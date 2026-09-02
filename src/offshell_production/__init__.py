@@ -1,5 +1,15 @@
 """Core event-record utilities for off-shell ``ZZ -> 2e2mu`` production."""
 
+from .harmonics import (
+    TRUTH_ANGULAR_BRANCH_SLUGS,
+    TRUTH_ANGULAR_COMPONENTS,
+    TRUTH_ANGULAR_COMPONENT_BY_SLUG,
+    TruthAngularComponent,
+    finite_angle_mask,
+    truth_angular_factor,
+    truth_angular_factors,
+    truth_angular_weights,
+)
 from .kinematics import (
     ANGULAR_BOOLEAN_FIELDS,
     ANGULAR_NUMERIC_FIELDS,
@@ -37,12 +47,16 @@ __all__ = [
     "LEPTON_KEYS",
     "MOMENTUM_COMPONENTS",
     "PDG_TO_LEPTON_KEY",
+    "TRUTH_ANGULAR_BRANCH_SLUGS",
+    "TRUTH_ANGULAR_COMPONENTS",
+    "TRUTH_ANGULAR_COMPONENT_BY_SLUG",
     "BornProjectionDiagnostics",
     "ExtractedLHEEvent",
     "FourLeptonCandidate",
     "LHEStatus",
     "OffshellSelectionConfig",
     "RecoSelectionResult",
+    "TruthAngularComponent",
     "angular_observables",
     "born_project_four_leptons",
     "build_four_lepton_candidate",
@@ -51,9 +65,13 @@ __all__ = [
     "empty_reco_selection_result",
     "evaluate_reco_selection",
     "extract_event_particles",
+    "finite_angle_mask",
     "iter_lhe_records",
     "load_lhe_dataframe",
     "particle_four_vector",
     "standard_five_angles",
+    "truth_angular_factor",
+    "truth_angular_factors",
+    "truth_angular_weights",
     "wrap_to_pi",
 ]

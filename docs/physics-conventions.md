@@ -69,6 +69,22 @@ jobs before recomputing these expressions. Its
 contract. The absolute efficiency remains a filter
 diagnostic, not a replacement normalization factor.
 
+When several job-level analysis files are merged, first sum the primitive
+counts and moments over jobs and only then recompute the two cross sections and
+their errors. The retained `Events` rows contain the requested HepMC sample,
+not the complete LHE safety stream, so their raw signed sum does not itself
+define the cross section. The merger leaves `weight_lhe` unchanged and adds
+
+\[
+w_i^{\mathrm{nominal}} = w_i^{\mathrm{LHE}}
+\frac{\sigma_{\mathrm{filtered}}}
+     {\sum_{k\in\mathrm{retained}} w_k^{\mathrm{LHE}}}.
+\]
+
+The same finite scale multiplies positive, negative, and zero weights. A
+vanishing, numerically unresolved, or sign-inconsistent retained sum is an
+error; it is never repaired with absolute weights.
+
 ## Fixed-flavor candidate
 
 At every level, build the candidate only from the four charge-ordered leptons:
@@ -120,6 +136,40 @@ In the Born-projected four-lepton rest frame,
 \(\hat b=(0,0,+1)\). The standard five-angle variables are stored separately
 and use the negative-lepton polar convention. In particular, lowercase
 `phi1` and uppercase `Phi1` are different observables.
+
+## Symmetric truth angular weights
+
+For \(\alpha=(\ell_1,m_1)\), \(\beta=(\ell_2,m_2)\), and the LHE-level
+Born-projected coordinates above, use the orthonormal exchange-symmetric basis
+
+\[
+\mathcal Y^{(+)}_{\alpha\beta}=
+\frac{Y_\alpha(\Omega_1)Y_\beta(\Omega_2)+
+      Y_\alpha(\Omega_2)Y_\beta(\Omega_1)}
+     {\sqrt{2(1+\delta_{\alpha\beta})}}.
+\]
+
+The expansion convention is
+
+\[
+p(\Omega_1,\Omega_2,x)=\frac{1}{4\pi}
+\sum_{\alpha\preceq\beta}\mathcal S_{\alpha\beta}(x)
+\mathcal Y^{(+)}_{\alpha\beta},
+\]
+
+so the per-event projector and cross-section contribution are
+
+\[
+F_{\alpha\beta}=4\pi\operatorname{Re}
+\mathcal Y^{(+)*}_{\alpha\beta},\qquad
+w^{\mathrm{truth}}_{\alpha\beta}=w^{\mathrm{nominal}}F_{\alpha\beta}.
+\]
+
+No division by \(S_{00;00}\) is applied. The current merge stage stores the
+real components \((0,0;2,0)\), \((2,0;2,0)\),
+\((2,-1;2,1)\), and \((2,-2;2,2)\). All four are real algebraically in the
+Condon--Shortley convention. Invalid LHE projections are retained with a false
+validity mask and NaN truth values.
 
 ## Event identity
 

@@ -48,6 +48,23 @@ the per-event `AUX_OAP_EVENT_ID/AUX_OAP_EVENT_UNIT` match, and embeds their
 normalized provenance in `analysis.root`. The compact output therefore remains
 self-describing when the larger intermediate files are not transferred.
 
+## Merge completed jobs
+
+Once several jobs for one sample and campaign have succeeded, merge their
+compact outputs and add the LHE truth angular weights with:
+
+```bash
+uv run python Merging/merge_analysis_outputs.py \
+  --output /data/$USER/offshell/merged/gg4l.root \
+  /data/$USER/offshell/production/gg4l_job*/analysis.root
+```
+
+The merger pools the pre-shower normalization primitives rather than averaging
+the per-job cross sections. It preserves the raw signed LHE weight, adds a
+pb-normalized nominal weight, and derives all angular factors from each event's
+Born-projected LHE angles. See `Merging/README.md` for the full schema and
+validation contract.
+
 ## HTCondor status
 
 The submit description, site resource requests, retries, and file-transfer

@@ -14,5 +14,6 @@ offshell-angular-production = { path = ".", editable = true, extras = ["test"] }
 
 [tasks]
 test = "pytest -q"
-lint = "python -m compileall -q src Analysis Generation Simulation UChicagoAF Workflow && bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh"
+lint = "python -m compileall -q src Analysis Generation Simulation Merging UChicagoAF Workflow && bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh"
 analyze = "python Analysis/build_analysis_tree.py"
+merge = "python Merging/merge_analysis_outputs.py"

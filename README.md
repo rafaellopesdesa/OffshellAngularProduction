@@ -9,13 +9,15 @@ with the Born-projected conventions of
 [offshell_angular_coefficients](https://github.com/rafaellopesdesa/offshell_angular_coefficients).
 
 ```mermaid
-flowchart LR
+flowchart TD
     G["ATLAS Gen_tf"] --> L["matched LHE"]
     G --> H["HepMC"]
     H --> D["Delphes"]
     L --> A["analysis reducer"]
     D --> A
-    A --> R["compact ROOT"]
+    A --> J["job ROOT files"]
+    J --> M["merge + truth weights"]
+    M --> R["campaign ROOT"]
 ```
 
 The two production modes are:
@@ -35,6 +37,7 @@ is not part of the chain.
 | `Generation/` | Local ATLAS job options and common `Gen_tf.py` runner |
 | `Simulation/` | Pinned, patched Delphes response with dressed and RECO leptons |
 | `Analysis/` | Strict LHE/Delphes matcher and compact ROOT writer |
+| `Merging/` | Cross-section-safe campaign merger and LHE truth angular weights |
 | `src/offshell_production/` | Shared Born projection, angles, LHE parsing, and selection |
 | `Workflow/` | One-job end-to-end worker, ready to wrap with HTCondor later |
 | `UChicagoAF/` | UChicago storage/environment guidance and container wrapper |
@@ -81,6 +84,13 @@ candidates remain as rows with false masks and `NaN` RECO values. The
 `reconstructed` flag applies the strict off-shell RECO selection, including
 both \(50<m_Z<106\) GeV windows and \(m_{4\ell}>180\) GeV.
 There is no upper RECO \(m_{4\ell}\) cut.
+
+After producing several job outputs, `Merging/merge_analysis_outputs.py`
+combines them without changing the raw signed `weight_lhe` branch. It pools the
+generator normalization primitives, adds a directly histogrammable nominal
+weight whose sum is the filtered cross section, and evaluates the requested
+symmetric angular projectors from the Born-projected LHE helicity angles. See
+`Merging/README.md` for the merge command and exact branch definitions.
 
 ## Important qqZZ matching note
 
