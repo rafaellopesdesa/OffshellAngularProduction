@@ -1,0 +1,28 @@
+name: unit tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install
+        run: uv sync --frozen --extra test
+      - name: Python tests
+        run: uv run --frozen --extra test python -m pytest -q
+      - name: Shell syntax
+        run: bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh

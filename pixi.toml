@@ -1,0 +1,18 @@
+[project]
+name = "offshell-angular-production"
+version = "0.1.0"
+description = "Off-shell ZZ Generation to Simulation to Analysis chain"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = ">=3.10,<3.14"
+pip = ">=24"
+
+[pypi-dependencies]
+offshell-angular-production = { path = ".", editable = true, extras = ["test"] }
+
+[tasks]
+test = "pytest -q"
+lint = "python -m compileall -q src Analysis Generation Simulation UChicagoAF Workflow && bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh"
+analyze = "python Analysis/build_analysis_tree.py"

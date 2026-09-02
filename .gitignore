@@ -1,0 +1,37 @@
+.venv/
+.pixi/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Generated event samples and detector outputs
+Generation/runs/
+Simulation/runs/
+Workflow/runs/
+*.EVNT.pool.root
+*.lhe
+*.lhe.gz
+*.events
+*.hepmc
+*.hepmc2
+*.hepmc3
+*.root
+*.yoda
+*.tar.gz
+
+# ATLAS/POWHEG/Delphes runtime products
+Generation/jobOptions/*/log.generate*
+Generation/jobOptions/*/*.GRID.tar.gz
+Generation/jobOptions/*/pwg*
+Simulation/software/
+Simulation/env.sh
+Simulation/delphes_card_*_resolved.tcl
+SUCCESS
+FAILED
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "offshell-angular-production"
+version = "0.1.0"
+description = "Generation-to-analysis utilities for off-shell ZZ to 2e2mu production"
+requires-python = ">=3.10"
+dependencies = [
+    "awkward>=2.6",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pylhe>=2.0",
+    "uproot>=5.3",
+    "vector>=1.4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/offshell_production"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests", "Analysis/tests", "Generation/tests", "Simulation/tests"]

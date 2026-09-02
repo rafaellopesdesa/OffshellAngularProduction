@@ -1,0 +1,6 @@
+env.sh
+software/
+downloads/
+runs/
+__pycache__/
+tests/__pycache__/
