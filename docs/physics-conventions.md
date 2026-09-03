@@ -8,12 +8,16 @@ change here is a physics change and should be accompanied by a targeted test.
 - `gg4l` denotes the full POWHEG `gg4l` contribution: Higgs-mediated diagrams,
   continuum diagrams, and their interference (`contr = "full"`).
 - `qqZZ` denotes the POWHEG quark-initiated continuum process.
-- Both samples are generated directly as exactly one final-state
+- `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT` denote the four
+  standalone VPolarized MadGraph components. Each retains the full
+  Higgs-mediated plus continuum-box amplitude and their interference; the
+  mixed channels are generated separately so `TL+LT` is an incoherent sum.
+- Every sample is generated directly as exactly one final-state
   \(e^-e^+\mu^-\mu^+\) system. Tau feed-down is not part of this production.
 - Finite signed generator weights are immutable. No stage takes their absolute
   value, rejects a negative-weight event, or renormalizes the stored weight.
-- Neither sample receives the branching-ratio factor used for an inclusive
-  `gg_H` sample. Both Delphes weight scales are exactly one.
+- No sample receives the branching-ratio factor used for an inclusive `gg_H`
+  sample. Every Delphes weight scale is exactly one.
 
 The generation phase spaces are:
 
@@ -21,6 +25,7 @@ The generation phase spaces are:
 |---|---:|---:|
 | `gg4l` | \(50\leq m_{\ell\ell}\leq 200\) GeV | native POWHEG and LHE check: \(150\leq m_{4\ell}\leq 3000\) GeV |
 | `qqZZ` | \(m_{\ell\ell}\geq 50\) GeV | pre-shower LHE filter: \(70\leq m_{4\ell}\leq 3000\) GeV |
+| `vpolar_LL/TT/TL/LT` | \(50\leq m_{\ell\ell}\leq 200\) GeV | native MadGraph and LHE check: \(150\leq m_{4\ell}\leq 3000\) GeV |
 
 The POWHEG `ZZ` implementation has no native four-lepton-mass keyword. With two
 50 GeV dilepton minima, its 70 GeV lower bound is kinematically redundant. A
@@ -44,10 +49,11 @@ and above-range counts together with
 \frac{\sum_{\mathrm{accepted}}|w|}{\sum_{\mathrm{generated}}|w|}.
 \]
 
-POWHEG is required to write `IDWTUP=-4`, for which each nominal `XWGTUP` is a
-signed cross-section estimator in pb. If \(N\) events were generated and the
-accepted weights have sum \(A\) and squared-weight sum \(Q_A\), the authoritative
-filtered normalization is
+Every backend is required to write `IDWTUP=-4`; the standalone MadGraph path
+obtains it from `event_norm=average`. Each nominal `XWGTUP` is then a signed
+cross-section estimator in pb. If \(N\) events were generated and the accepted
+weights have sum \(A\) and squared-weight sum \(Q_A\), the authoritative filtered
+normalization is
 
 \[
 \sigma_{\mathrm{filtered}}=\frac{A}{N},\qquad
@@ -56,7 +62,7 @@ filtered normalization is
 
 Rejected events enter this estimator with zero weight, so the uncertainty
 includes both filter acceptance and signed-weight fluctuations. The error is a
-finite-LHE Monte Carlo standard error, not a POWHEG integration-grid error; it
+finite-LHE Monte Carlo standard error, not a generator integration-grid error; it
 is undefined for \(N<2\). The inclusive estimator uses the same expressions
 with all generated weights. LHE `<init>` `XSECUP/XERRUP` values and the running
 cross-section fields carried through HepMC and Delphes are preserved only as
@@ -179,10 +185,11 @@ The logical source identity is
 (campaign_id, sample_code, job_id, source_event_id)
 ```
 
-where `sample_code` is 0 for `gg4l` and 1 for `qqZZ`. A deterministic 128-bit
-digest is stored as two unsigned 64-bit words for convenient joining. Processing
-failures and unmatched events are fatal pipeline errors, not detector
-inefficiencies.
+where `sample_code` is 0 for `gg4l`, 1 for `qqZZ`, and 10 through 13 for
+`vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`, respectively. A
+deterministic 128-bit digest is stored as two unsigned 64-bit words for
+convenient joining. Processing failures and unmatched events are fatal pipeline
+errors, not detector inefficiencies.
 
 The `named-weight-id-v1` contract recovers each HepMC source ID from
 `AUX_OAP_EVENT_ID/AUX_OAP_EVENT_UNIT` within bounded floating-point tolerance.

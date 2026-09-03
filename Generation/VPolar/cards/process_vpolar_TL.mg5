@@ -1,0 +1,6 @@
+# Z1=mumu is transverse and Z2=ee is longitudinal.  The explicit filter
+# partitions TL from LT, so summing their event samples has no TL/LT interference.
+set loop_optimized_output True
+import model SM_Loop_ZPolar
+generate g g > e+ e- mu+ mu- QED=4 QCD=2 [noborn = QCD] / a z za --loop_filter=oap_tl
+output processes/vpolar_TL -f

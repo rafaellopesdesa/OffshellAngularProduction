@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -35,6 +36,52 @@ def _fake_gen_tf(directory: Path, help_text: str) -> Path:
     )
     executable.chmod(0o755)
     return executable
+
+
+def test_vpolar_dispatch_preserves_process_and_arguments(tmp_path: Path):
+    generation = tmp_path / "Generation"
+    vpolar = generation / "VPolar"
+    vpolar.mkdir(parents=True)
+    dispatcher = generation / "run_generation.sh"
+    shutil.copy2(RUNNER, dispatcher)
+    delegated = vpolar / "run_vpolar_generation.sh"
+    delegated.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$@\"\n",
+        encoding="utf-8",
+    )
+    delegated.chmod(0o755)
+
+    prefix = tmp_path / "generator software"
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            str(dispatcher),
+            "vpolar_TL",
+            "--events",
+            "17",
+            "--seed",
+            "23",
+            "--generator-prefix",
+            str(prefix),
+            "--dry-run",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "vpolar_TL",
+        "--events",
+        "17",
+        "--seed",
+        "23",
+        "--generator-prefix",
+        str(prefix),
+        "--dry-run",
+    ]
 
 
 def test_missing_gridpack_does_not_claim_output(tmp_path: Path):

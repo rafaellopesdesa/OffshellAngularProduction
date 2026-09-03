@@ -34,8 +34,10 @@ for import_root in (SOURCE_ROOT, REPO_ROOT):
         sys.path.insert(0, str(import_root))
 
 from Analysis.build_analysis_tree import (  # noqa: E402
+    ATHGENERATION_BACKEND,
     SCHEMA_VERSION as ANALYSIS_SCHEMA_VERSION,
     SAMPLE_CODES,
+    STANDALONE_GENERATOR_BACKEND,
     event_uid,
     output_schema,
 )
@@ -168,7 +170,7 @@ PHYSICS_INVARIANT_PATHS = (
     ("provenance", "generation", "process"),
     ("provenance", "generation", "run_number"),
     ("provenance", "generation", "ecm_energy_gev"),
-    ("provenance", "generation", "athgeneration_release"),
+    ("provenance", "generation", "generator_backend"),
     ("provenance", "generation", "generator_mll_min_gev"),
     ("provenance", "generation", "generator_m4l_min_gev"),
     ("provenance", "generation", "generator_m4l_max_gev"),
@@ -199,8 +201,6 @@ PHYSICS_INVARIANT_PATHS = (
     ("provenance", "alignment", "contract"),
     ("provenance", "alignment", "process"),
     ("provenance", "alignment", "run_number"),
-    ("provenance", "alignment", "athgeneration_release"),
-    ("provenance", "alignment", "job_option_sha256"),
     ("provenance", "alignment", "hepmc_precision_contract"),
     ("provenance", "alignment", "contract_conditions"),
     ("provenance", "simulation", "schema_version"),
@@ -218,12 +218,53 @@ PHYSICS_INVARIANT_PATHS = (
 )
 
 OPTIONAL_PHYSICS_INVARIANT_PATHS = (
+    # Backend-specific generation/alignment records.  Presence itself is part
+    # of the fingerprint, so a campaign cannot mix AthGeneration and the
+    # standalone MadGraph/Pythia VPolar backend.
+    ("provenance", "generation", "athgeneration_release"),
     ("provenance", "generation", "atlas_project"),
     ("provenance", "generation", "atlas_version"),
     ("provenance", "generation", "job_option_sha256"),
+    ("provenance", "generation", "athgeneration_release_applicable"),
+    ("provenance", "generation", "generator_mll_max_gev"),
+    ("provenance", "generation", "final_state"),
+    ("provenance", "generation", "full_amplitude"),
+    ("provenance", "generation", "photon_diagrams"),
+    ("provenance", "generation", "polarization_component"),
+    ("provenance", "generation", "polarization_z1_decay"),
+    ("provenance", "generation", "polarization_z2_decay"),
+    ("provenance", "generation", "polarization_frame"),
+    ("provenance", "generation", "madgraph_me_frame"),
+    ("provenance", "generation", "mixed_polarization_interference"),
+    ("provenance", "generation", "mixed_sample_definition"),
+    ("provenance", "generation", "madgraph_version"),
+    ("provenance", "generation", "pythia_version"),
+    ("provenance", "generation", "hepmc_version"),
+    ("provenance", "generation", "ufo_version"),
+    ("provenance", "generation", "ufo_sha256"),
+    ("provenance", "generation", "loop_filter_sha256"),
+    ("provenance", "generation", "loop_filter_patch_sha256"),
+    ("provenance", "generation", "installation_manifest_sha256"),
+    ("provenance", "generation", "process_card_sha256"),
+    ("provenance", "generation", "madloop_card_sha256"),
+    ("provenance", "generation", "param_card_sha256"),
+    ("provenance", "generation", "loop_reduction_backend"),
+    ("provenance", "generation", "loop_optimized_output"),
+    ("provenance", "generation", "madloop_reduction_lib"),
+    ("provenance", "generation", "ninja_enabled"),
+    ("provenance", "generation", "collier_enabled"),
+    ("provenance", "generation", "loop_output_dependencies"),
+    ("provenance", "generation", "pdf_set"),
+    ("provenance", "generation", "pdf_id"),
+    ("provenance", "generation", "shower_profile"),
+    ("provenance", "generation", "pythia_tune_pp"),
+    ("provenance", "generation", "pythia_pdf_pset"),
     ("provenance", "generation", "run_generation_sha256"),
     ("provenance", "generation", "lhe_contract_script_sha256"),
     ("provenance", "generation", "alignment_script_sha256"),
+    ("provenance", "alignment", "athgeneration_release"),
+    ("provenance", "alignment", "job_option_sha256"),
+    ("provenance", "alignment", "generator_backend"),
     ("provenance", "simulation", "hepmc_format"),
     ("provenance", "simulation", "cross_section_fields_preserved"),
     ("provenance", "simulation", "event_retention_validated"),
@@ -231,6 +272,13 @@ OPTIONAL_PHYSICS_INVARIANT_PATHS = (
     ("provenance", "simulation", "event_number_branch"),
     ("provenance", "simulation", "dressed_particles"),
     ("provenance", "simulation", "dressed_lepton_origin"),
+    ("provenance", "simulation", "dressed_lepton_origin_policy"),
+    (
+        "provenance",
+        "simulation",
+        "dressed_lepton_direct_hard_process_candidates",
+    ),
+    ("provenance", "simulation", "dressed_lepton_exact_2e2mu_validated"),
     ("provenance", "simulation", "dressed_lepton_tau_decay_chains"),
     ("provenance", "simulation", "dressed_lepton_photons"),
     ("provenance", "simulation", "reco_leptons"),
@@ -476,6 +524,9 @@ def _validate_job_normalization(
         raise ProvenanceError(f"{path}: nominal LHE weights are not in pb")
     if contract.get("lhe_weighting_strategy") != -4:
         raise ProvenanceError(f"{path}: LHE weighting strategy is not IDWTUP=-4")
+    lhe_init = contract.get("lhe_init")
+    if not isinstance(lhe_init, Mapping) or lhe_init.get("idwtup") != -4:
+        raise ProvenanceError(f"{path}: LHE init weighting strategy is not IDWTUP=-4")
 
     pairs = {
         "normalization_generated_lhe_events": "generated_lhe_events",
@@ -615,20 +666,34 @@ def _validate_run_provenance(
         float(generation.get("ecm_energy_gev", math.nan)),
         f"{path}: Runs.ecm_energy_gev",
     )
-    release = str(generation.get("athgeneration_release", ""))
-    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", release)
-    if match is None:
-        raise ProvenanceError(f"{path}: invalid embedded AthGeneration release")
-    release_parts = tuple(int(part) for part in match.groups())
     run_release = (
         int(run["athgeneration_release_major"]),
         int(run["athgeneration_release_minor"]),
         int(run["athgeneration_release_patch"]),
     )
-    if run_release != release_parts:
-        raise ProvenanceError(
-            f"{path}: Runs AthGeneration release disagrees with metadata"
-        )
+    backend = str(generation.get("generator_backend", ""))
+    if backend == ATHGENERATION_BACKEND:
+        release = str(generation.get("athgeneration_release", ""))
+        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", release)
+        if match is None:
+            raise ProvenanceError(f"{path}: invalid embedded AthGeneration release")
+        release_parts = tuple(int(part) for part in match.groups())
+        if run_release != release_parts:
+            raise ProvenanceError(
+                f"{path}: Runs AthGeneration release disagrees with metadata"
+            )
+    elif backend == STANDALONE_GENERATOR_BACKEND:
+        if "athgeneration_release" in generation:
+            raise ProvenanceError(
+                f"{path}: standalone generation metadata declares an "
+                "AthGeneration release"
+            )
+        if run_release != (0, 0, 0):
+            raise ProvenanceError(
+                f"{path}: standalone Runs AthGeneration release must be 0.0.0"
+            )
+    else:
+        raise ProvenanceError(f"{path}: unsupported generator backend {backend!r}")
 
 
 def _alternative_weight_ids(

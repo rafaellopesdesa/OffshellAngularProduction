@@ -44,7 +44,8 @@ The stable logical key is
 (campaign_id, sample_code, job_id, source_event_id)
 ```
 
-with `sample_code=0` for gg4l and `sample_code=1` for qqZZ.  Two deterministic
+with `sample_code=0` for gg4l, `sample_code=1` for qqZZ, and codes 10, 11, 12,
+and 13 for VPolar LL, TT, TL, and LT, respectively. Two deterministic
 BLAKE2b-128 words, `event_uid_hi` and `event_uid_lo`, make that key convenient
 to carry through later merges. `lhe_event_index` remains the matched-file
 ordinal and is only a diagnostic. Merging must preserve the source identity;
@@ -84,8 +85,13 @@ metadata digests recorded by simulation; and the process, generation seed,
 run number, AthGeneration release, first event, alignment contract, and event
 counts across all stages. The LHE-contract metadata hash, process, phase-space
 bounds, and requested count are validated against generation and alignment as
-well. This rejects accidentally mixing files from two jobs even when their
-entry counts happen to agree. Paths may contain `=`.
+well. Simulation metadata schema 3 additionally binds the process-aware
+dressed-lepton origin contract. Standalone VPolar inputs must declare the
+direct-hard-gg requirement and successful exact signed-`2e2mu` validation;
+new AthGeneration inputs must declare the legacy resonant-boson policy with
+that direct-hard mode disabled. Schema 2 remains readable only for legacy
+AthGeneration outputs. This rejects accidentally mixing files from two jobs
+even when their entry counts happen to agree. Paths may contain `=`.
 
 The embedded `analysis_metadata` object also records SHA-256 hashes for the
 reducer, the four local `offshell_production` source modules, `pyproject.toml`,

@@ -201,6 +201,7 @@ def _write_provenance(
     source_ids: tuple[int, ...] = (2, 7),
     zero_sum_normalization: bool = False,
     single_generated_normalization: bool = False,
+    standalone: bool = False,
 ) -> dict[str, Path]:
     if len(source_ids) != event_count:
         raise ValueError("source_ids and event_count must agree")
@@ -208,17 +209,47 @@ def _write_provenance(
     lhe_contract = directory / "lhe-contract-metadata.json"
     alignment = directory / "alignment-metadata.json"
     simulation = directory / "simulation-metadata.txt"
+    run_numbers = {
+        "gg4l": 100001,
+        "qqZZ": 100002,
+        "vpolar_LL": 100003,
+        "vpolar_TT": 100004,
+        "vpolar_TL": 100005,
+        "vpolar_LT": 100006,
+    }
+    run_number = run_numbers[process]
+    m4l_min = 150 if process == "gg4l" or process.startswith("vpolar_") else 70
+    backend_metadata = (
+        "generator_backend=madgraph5-pythia8-vpolar-standalone\n"
+        "matrix_element_seed=17\n"
+        "shower_seed=17\n"
+        f"polarization_component={process.removeprefix('vpolar_')}\n"
+        "polarization_z1_decay=mumu\n"
+        "polarization_z2_decay=ee\n"
+        "polarization_frame=four_lepton_rest_frame\n"
+        "madgraph_me_frame=3,4,5,6\n"
+        "mixed_polarization_interference=not_applicable\n"
+        "loop_reduction_backend=CutTools\n"
+        "loop_optimized_output=true\n"
+        "madloop_reduction_lib=1\n"
+        "ninja_enabled=false\n"
+        "collier_enabled=false\n"
+        "loop_output_dependencies=external\n"
+        if standalone
+        else "athgeneration_release=23.6.41\njob_option=/tmp/job=option.py\n"
+    )
     generation.write_text(
         "schema_version=1\n"
         f"process={process}\n"
         "seed=17\n"
         f"events={event_count}\n"
         "first_event=1\n"
-        f"run_number={100001 if process == 'gg4l' else 100002}\n"
+        f"run_number={run_number}\n"
         "ecm_energy_gev=13600\n"
-        "athgeneration_release=23.6.41\n"
+        f"{backend_metadata}"
         "generator_mll_min_gev=50\n"
-        f"generator_m4l_min_gev={150 if process == 'gg4l' else 70}\n"
+        "generator_mll_max_gev=200\n"
+        f"generator_m4l_min_gev={m4l_min}\n"
         "generator_m4l_max_gev=3000\n"
         "analysis_mz_min_gev=50\n"
         "analysis_mz_max_gev=106\n"
@@ -226,8 +257,7 @@ def _write_provenance(
         "analysis_m4l_max_gev=none\n"
         "target_generation_phase_space_m4l_max_gev=3000\n"
         "alignment_contract=named-weight-id-v1\n"
-        "lhe_event_id_contract=named-weight-id-v1\n"
-        "job_option=/tmp/job=option.py\n",
+        "lhe_event_id_contract=named-weight-id-v1\n",
         encoding="utf-8",
     )
     accepted_lhe_events = event_count
@@ -288,7 +318,7 @@ def _write_provenance(
         "marker_unit_weight": MARKER_UNIT_WEIGHT_NAME,
         "hepmc_recovery_formula": ("AUX_OAP_EVENT_ID / AUX_OAP_EVENT_UNIT"),
         "requested_hepmc_events": event_count,
-        "m4l_min_gev": 150.0 if process == "gg4l" else 70.0,
+        "m4l_min_gev": float(m4l_min),
         "m4l_max_gev": 3000.0,
         "generated_lhe_events": generated_lhe_events,
         "accepted_lhe_events": accepted_lhe_events,
@@ -329,16 +359,89 @@ def _write_provenance(
     lhe_contract.write_text(
         json.dumps(lhe_contract_payload, indent=2) + "\n", encoding="utf-8"
     )
+    generation_config_payload: dict[str, object] | None = None
+    generation_config: Path | None = None
+    shower_log: Path | None = None
+    if standalone:
+        card_paths = {
+            "process": directory / "madgraph-process-card.dat",
+            "run": directory / "madgraph-run-card.dat",
+            "param": directory / "madgraph-param-card.dat",
+            "madloop": directory / "madgraph-madloop-card.dat",
+            "pythia": directory / "pythia8-card.cmnd",
+        }
+        for role, card_path in card_paths.items():
+            card_path.write_text(
+                (
+                    "#MLReductionLib\n1\n"
+                    if role == "madloop"
+                    else f"synthetic realized {role} card\n"
+                ),
+                encoding="utf-8",
+            )
+        shower_log = directory / "pythia8.log"
+        shower_log.write_text("synthetic Pythia log\n", encoding="utf-8")
+        generation_config = directory / "generation-config.json"
+        generation_config_payload = {
+            "schema_version": 1,
+            "contract": "oap-vpolar-generation-config-v1",
+            "generator_backend": "madgraph5-pythia8-vpolar-standalone",
+            "process": process,
+            "polarization_component": process.removeprefix("vpolar_"),
+            "run_number": run_number,
+            "ecm_energy_gev": 13600.0,
+            "requested_events": event_count,
+            "generated_lhe_events": generated_lhe_events,
+            "matrix_element_seed": 17,
+            "shower_seed": 17,
+            "mll_min_gev": 50.0,
+            "mll_max_gev": 200.0,
+            "m4l_min_gev": float(m4l_min),
+            "m4l_max_gev": 3000.0,
+            "loop_reduction": {
+                "backend": "CutTools",
+                "collier": None,
+                "loop_optimized_output": True,
+                "madloop_reduction_lib": "1",
+                "ninja": None,
+                "output_dependencies": "external",
+            },
+            "run_card_validation": {
+                "exact_contract_checked": True,
+                "automatic_pt_eta_dr_cuts_disabled": True,
+            },
+            "cards": {
+                role: {
+                    "path": card_path.name,
+                    "path_scope": "generation_run_directory",
+                    "sha256": _sha256(card_path),
+                }
+                for role, card_path in card_paths.items()
+            },
+        }
+        generation_config.write_text(
+            json.dumps(generation_config_payload, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        with generation.open("a", encoding="utf-8") as stream:
+            stream.write(
+                f"generation_config={generation_config.name}\n"
+                f"generation_config_sha256={_sha256(generation_config)}\n"
+                f"shower_log={shower_log.name}\n"
+                f"shower_log_sha256={_sha256(shower_log)}\n"
+                + "".join(
+                    f"{role}_card_sha256={_sha256(card_path)}\n"
+                    for role, card_path in card_paths.items()
+                )
+            )
     hepmc_sha = hashlib.sha256(b"synthetic HepMC job").hexdigest()
-    run_number = 100001 if process == "gg4l" else 100002
     alignment_payload = {
-        "schema_version": 2,
+        "schema_version": 3 if standalone else 2,
         "contract": "named-weight-id-v1",
         "process": process,
         "run_number": run_number,
         "random_seed": 17,
         "first_event": 1,
-        "athgeneration_release": "23.6.41",
         "counts": {
             "requested_hepmc_events": event_count,
             "hepmc_events": event_count,
@@ -402,18 +505,61 @@ def _write_provenance(
         "files": {
             "matched_lhe": {"path": str(lhe), "sha256": _sha256(lhe)},
             "hepmc": {"path": "/tmp/hepmc=events", "sha256": hepmc_sha},
-            "job_option": {"path": "/tmp/job=option.py", "sha256": "d" * 64},
             "lhe_contract_metadata": {
                 "path": str(lhe_contract),
                 "sha256": _sha256(lhe_contract),
             },
         },
     }
+    if standalone:
+        assert generation_config is not None
+        assert generation_config_payload is not None
+        assert shower_log is not None
+        alignment_payload["generator_backend"] = (
+            "madgraph5-pythia8-vpolar-standalone"
+        )
+        alignment_payload["matrix_element_seed"] = 17
+        alignment_payload["shower_seed"] = 17
+        alignment_payload["generation_config"] = generation_config_payload
+        alignment_payload["contract_conditions"][
+            "generation_config_validated"
+        ] = True
+        alignment_payload["files"].update(
+            {
+                "generation_config": {
+                    "path": generation_config.name,
+                    "path_scope": "generation_run_directory",
+                    "sha256": _sha256(generation_config),
+                },
+                "shower_log": {
+                    "path": shower_log.name,
+                    "path_scope": "generation_run_directory",
+                    "sha256": _sha256(shower_log),
+                },
+            }
+        )
+    else:
+        alignment_payload["athgeneration_release"] = "23.6.41"
+        alignment_payload["files"]["job_option"] = {
+            "path": "/tmp/job=option.py",
+            "sha256": "d" * 64,
+        }
     alignment.write_text(
         json.dumps(alignment_payload, indent=2) + "\n", encoding="utf-8"
     )
+    dressed_origin = (
+        "direct_hard_gg,non_hadronic,exact_signed_e_mu_copy_chain"
+        if standalone
+        else "W_or_Z_or_gammaStar_mass_gt_5,non_hadronic,direct_e_mu_only"
+    )
+    dressed_origin_policy = (
+        "vpolar_direct_hard_gg_v1"
+        if standalone
+        else "resonant_boson_origin_v1"
+    )
+    direct_hard_required = str(standalone).lower()
     simulation.write_text(
-        "schema_version=2\n"
+        "schema_version=3\n"
         f"input_file=/tmp/hepmc=events\n"
         f"input_sha256={hepmc_sha}\n"
         f"output_file={delphes}\n"
@@ -435,6 +581,11 @@ def _write_provenance(
         "event_retention_validated=true\n"
         "event_order_preserved=true\n"
         "event_number_branch=Event.Number\n"
+        f"dressed_lepton_origin={dressed_origin}\n"
+        f"dressed_lepton_origin_policy={dressed_origin_policy}\n"
+        "dressed_lepton_direct_hard_process_candidates="
+        f"{direct_hard_required}\n"
+        f"dressed_lepton_exact_2e2mu_validated={direct_hard_required}\n"
         "delphes_version=3.5.1\n"
         "delphes_commit=0123456789abcdef\n"
         "card_sha256=" + "a" * 64 + "\n"
@@ -457,6 +608,17 @@ def test_event_uid_is_stable_and_uses_complete_logical_key():
     assert nominal != event_uid(42, SAMPLE_CODES["qqZZ"], 7, 9)
     assert nominal != event_uid(42, SAMPLE_CODES["gg4l"], 8, 9)
     assert nominal != event_uid(42, SAMPLE_CODES["gg4l"], 7, 10)
+
+
+def test_vpolar_sample_codes_are_permanent_and_distinct():
+    assert SAMPLE_CODES == {
+        "gg4l": 0,
+        "qqZZ": 1,
+        "vpolar_LL": 10,
+        "vpolar_TT": 11,
+        "vpolar_TL": 12,
+        "vpolar_LT": 13,
+    }
 
 
 def test_writes_one_row_per_lhe_and_retains_negative_unreconstructed_event(
@@ -568,6 +730,226 @@ def test_writes_one_row_per_lhe_and_retains_negative_unreconstructed_event(
     for relative_path in ANALYSIS_CODE_FILES:
         assert embedded["analysis_code"]["files"][relative_path]["sha256"] == (
             _sha256(repository / relative_path)
+        )
+
+
+def test_standalone_provenance_uses_generic_backend_and_zero_release_triplet(
+    tmp_path: Path,
+):
+    lhe = tmp_path / "events.lhe"
+    delphes = tmp_path / "delphes.root"
+    output = tmp_path / "analysis.root"
+    _write_lhe(lhe)
+    _write_delphes(delphes, (1, 2))
+    metadata = _write_provenance(
+        tmp_path,
+        lhe,
+        delphes,
+        process="vpolar_LL",
+        standalone=True,
+    )
+
+    build_analysis_tree(
+        lhe,
+        delphes,
+        output,
+        sample="vpolar_LL",
+        job_id=18,
+        campaign_id=20260902,
+        **metadata,
+    )
+
+    with uproot.open(output) as root_file:
+        runs = root_file["Runs"].arrays(library="np")
+        embedded = json.loads(str(root_file["analysis_metadata"]))
+    assert runs["sample_code"][0] == 10
+    assert runs["run_number"][0] == 100003
+    assert runs["athgeneration_release_major"][0] == 0
+    assert runs["athgeneration_release_minor"][0] == 0
+    assert runs["athgeneration_release_patch"][0] == 0
+    generation = embedded["provenance"]["generation"]
+    assert generation["generator_backend"] == (
+        "madgraph5-pythia8-vpolar-standalone"
+    )
+    assert "athgeneration_release" not in generation
+    assert generation["loop_reduction_backend"] == "CutTools"
+    assert generation["loop_optimized_output"] is True
+    assert generation["madloop_reduction_lib"] == 1
+    assert generation["ninja_enabled"] is False
+    assert generation["collier_enabled"] is False
+    alignment = embedded["provenance"]["alignment"]
+    assert alignment["schema_version"] == 3
+    assert alignment["generation_config_sha256"] == _sha256(
+        tmp_path / "generation-config.json"
+    )
+    assert alignment["shower_log_sha256"] == _sha256(tmp_path / "pythia8.log")
+    assert "job_option_sha256" not in alignment
+    simulation = embedded["provenance"]["simulation"]
+    assert simulation["dressed_lepton_origin_policy"] == (
+        "vpolar_direct_hard_gg_v1"
+    )
+    assert simulation["dressed_lepton_direct_hard_process_candidates"] is True
+    assert simulation["dressed_lepton_exact_2e2mu_validated"] is True
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    (
+        (
+            "dressed_lepton_origin_policy=vpolar_direct_hard_gg_v1",
+            "dressed_lepton_origin_policy=resonant_boson_origin_v1",
+            "dressed-lepton origin policy mismatch",
+        ),
+        (
+            "dressed_lepton_direct_hard_process_candidates=true",
+            "dressed_lepton_direct_hard_process_candidates=false",
+            "direct-hard dressed-lepton requirement mismatch",
+        ),
+        (
+            "dressed_lepton_exact_2e2mu_validated=true",
+            "dressed_lepton_exact_2e2mu_validated=false",
+            "exact dressed 2e2mu validation mismatch",
+        ),
+    ),
+)
+def test_rejects_weakened_vpolar_dressed_origin_contract(
+    tmp_path: Path, old: str, new: str, message: str
+):
+    lhe = tmp_path / "events.lhe"
+    delphes = tmp_path / "delphes.root"
+    output = tmp_path / "analysis.root"
+    _write_lhe(lhe)
+    _write_delphes(delphes, (1, 2))
+    metadata = _write_provenance(
+        tmp_path,
+        lhe,
+        delphes,
+        process="vpolar_LL",
+        standalone=True,
+    )
+    simulation_path = metadata["simulation_metadata_path"]
+    simulation_text = simulation_path.read_text(encoding="utf-8")
+    assert old in simulation_text
+    simulation_path.write_text(
+        simulation_text.replace(old, new), encoding="utf-8"
+    )
+
+    with pytest.raises(ProvenanceError, match=message):
+        build_analysis_tree(
+            lhe,
+            delphes,
+            output,
+            sample="vpolar_LL",
+            job_id=18,
+            **metadata,
+        )
+
+
+def test_legacy_simulation_schema_two_remains_athgeneration_only(tmp_path: Path):
+    lhe = tmp_path / "events.lhe"
+    delphes = tmp_path / "delphes.root"
+    output = tmp_path / "analysis.root"
+    _write_lhe(lhe)
+    _write_delphes(delphes, (1, 2))
+    metadata = _write_provenance(tmp_path, lhe, delphes, process="gg4l")
+    simulation_path = metadata["simulation_metadata_path"]
+    legacy_lines = [
+        "schema_version=2" if line == "schema_version=3" else line
+        for line in simulation_path.read_text(encoding="utf-8").splitlines()
+        if not line.startswith(
+            (
+                "dressed_lepton_origin=",
+                "dressed_lepton_origin_policy=",
+                "dressed_lepton_direct_hard_process_candidates=",
+                "dressed_lepton_exact_2e2mu_validated=",
+            )
+        )
+    ]
+    simulation_path.write_text("\n".join(legacy_lines) + "\n", encoding="utf-8")
+
+    build_analysis_tree(
+        lhe,
+        delphes,
+        output,
+        sample="gg4l",
+        job_id=18,
+        **metadata,
+    )
+    assert output.is_file()
+
+
+def test_rejects_simulation_schema_two_for_vpolar(tmp_path: Path):
+    lhe = tmp_path / "events.lhe"
+    delphes = tmp_path / "delphes.root"
+    output = tmp_path / "analysis.root"
+    _write_lhe(lhe)
+    _write_delphes(delphes, (1, 2))
+    metadata = _write_provenance(
+        tmp_path,
+        lhe,
+        delphes,
+        process="vpolar_LL",
+        standalone=True,
+    )
+    simulation_path = metadata["simulation_metadata_path"]
+    simulation_path.write_text(
+        simulation_path.read_text(encoding="utf-8").replace(
+            "schema_version=3", "schema_version=2", 1
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProvenanceError, match="schema 2 is supported only"):
+        build_analysis_tree(
+            lhe,
+            delphes,
+            output,
+            sample="vpolar_LL",
+            job_id=18,
+            **metadata,
+        )
+
+
+def test_rejects_standalone_backend_in_legacy_alignment_schema(tmp_path: Path):
+    lhe = tmp_path / "events.lhe"
+    delphes = tmp_path / "delphes.root"
+    output = tmp_path / "analysis.root"
+    _write_lhe(lhe)
+    _write_delphes(delphes, (1, 2))
+    metadata = _write_provenance(
+        tmp_path,
+        lhe,
+        delphes,
+        process="vpolar_LL",
+        standalone=True,
+    )
+    alignment_path = metadata["alignment_metadata_path"]
+    alignment = json.loads(alignment_path.read_text(encoding="utf-8"))
+    alignment["schema_version"] = 2
+    alignment.pop("generator_backend")
+    alignment_path.write_text(json.dumps(alignment) + "\n", encoding="utf-8")
+    simulation_path = metadata["simulation_metadata_path"]
+    simulation_text = simulation_path.read_text(encoding="utf-8")
+    simulation_path.write_text(
+        simulation_text.replace(
+            next(
+                line
+                for line in simulation_text.splitlines()
+                if line.startswith("alignment_metadata_sha256=")
+            ),
+            f"alignment_metadata_sha256={_sha256(alignment_path)}",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProvenanceError, match="legacy alignment metadata"):
+        build_analysis_tree(
+            lhe,
+            delphes,
+            output,
+            sample="vpolar_LL",
+            job_id=18,
+            **metadata,
         )
 
 

@@ -2,9 +2,10 @@
 
 This directory provides the first stage of the
 `Generation -> Simulation -> Analysis` chain on the UChicago Analysis
-Facility. It uses the ATLAS `Gen_tf.py` transform and the centrally installed
-POWHEG, Pythia8, EvtGen, LHAPDF, and HepMC stack. No local generator build and
-no Herwig installation are needed.
+Facility. `run_generation.sh` dispatches `gg4l` and `qqZZ` to the ATLAS
+`Gen_tf.py` stack, and `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`
+to the separately installed MadGraph/Pythia backend in `VPolar/`. Herwig is
+not used by either path.
 
 The two local-only run numbers are:
 
@@ -12,9 +13,18 @@ The two local-only run numbers are:
 |---|---:|---|
 | `gg4l` | 100001 | POWHEG-BOX-RES `gg -> (H* + continuum + interference) -> 2e2mu` |
 | `qqZZ` | 100002 | POWHEG `qq -> ZZ -> 2e2mu` |
+| `vpolar_LL` | 100003 | VPolar full loop-induced `gg -> ZL ZL -> 2e2mu` |
+| `vpolar_TT` | 100004 | VPolar full loop-induced `gg -> ZT ZT -> 2e2mu` |
+| `vpolar_TL` | 100005 | VPolar full loop-induced `gg -> ZT(mu mu) ZL(e e) -> 2e2mu` |
+| `vpolar_LT` | 100006 | VPolar full loop-induced `gg -> ZL(mu mu) ZT(e e) -> 2e2mu` |
 
 These numbers are identifiers for local production, not registered ATLAS
 DSIDs.
+
+The VPolar rows are exclusive `e+ e- mu+ mu-` and retain Higgs, continuum-box,
+and Higgs/box interference diagrams. See `VPolar/README.md` for the one-time
+installation, exact process definitions, and validated incoherent `TL+LT`
+construction.
 
 ## Run at the UChicago AF
 

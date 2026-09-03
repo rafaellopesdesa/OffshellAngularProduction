@@ -8,7 +8,7 @@ ECM_ENERGY_GEV=13600
 
 usage() {
   cat <<'EOF'
-Run the ATLAS POWHEG -> Pythia8 generation transform.
+Run one supported hard-event generation backend through the common interface.
 
 Usage:
   ./run_generation.sh PROCESS [options]
@@ -16,23 +16,30 @@ Usage:
 PROCESS:
   gg4l                 gg -> (H* + continuum + interference) -> 2e2mu
   qqZZ                 qq -> ZZ -> 2e2mu
+  vpolar_LL            gg -> ZL(mu mu) ZL(e e) -> 2e2mu
+  vpolar_TT            gg -> ZT(mu mu) ZT(e e) -> 2e2mu
+  vpolar_TL            gg -> ZT(mu mu) ZL(e e) -> 2e2mu
+  vpolar_LT            gg -> ZL(mu mu) ZT(e e) -> 2e2mu
 
 Options:
-  --events N           Requested output events (default: 50 gg4l, 1000 qqZZ)
-  --seed N             POWHEG/transform random seed (default: 1)
-  --first-event N      First ATLAS event number (default: 1)
+  --events N           Requested output events (default: 50 gg4l/VPolar, 1000 qqZZ)
+  --seed N             Generator and shower random seed (default: 1)
+  --first-event N      First output event number (default: 1)
   --output-dir DIR     Run directory (default: Generation/runs/PROCESS_seedSEED)
   --release VERSION    AthGeneration version (default: 23.6.41)
   --gridpack FILE      Reuse a compatible integration_grids.tar.gz
   --gridpack-metadata FILE
                        Manifest for --gridpack (default: FILE.metadata.json)
+  --generator-prefix DIR
+                       VPolar MadGraph/Pythia installation prefix
+  --cores N            VPolar MadGraph local cores (default: 1)
   --no-setup           Use an already configured AthGeneration environment
   --dry-run            Print the resolved transform command without running it
   -h, --help           Show this help
 
-The job option applies the hard-event phase-space bounds and injects two named
-technical weights before Pythia. Their ratio provides the exact source-event
-ID used to match the LHE and HepMC records after showering.
+The selected backend applies the hard-event phase-space bounds and injects two
+named technical weights before Pythia. Their ratio provides the exact
+source-event ID used to match the LHE and HepMC records after showering.
 EOF
 }
 
@@ -47,6 +54,16 @@ fi
 
 PROCESS="$1"
 shift
+
+# VPolar uses a separately installed MadGraph/Pythia toolchain, but keeps this
+# public entry point and its common job options.  Its runner owns all
+# VPolar-specific validation, including --generator-prefix.
+case "$PROCESS" in
+  vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT)
+    exec "$SCRIPT_DIR/VPolar/run_vpolar_generation.sh" "$PROCESS" "$@"
+    ;;
+esac
+
 case "$PROCESS" in
   gg4l)
     RUN_NUMBER=100001
@@ -64,7 +81,7 @@ case "$PROCESS" in
     GENERATOR_M4L_MAX_GEV=3000
     ;;
   *)
-    echo "PROCESS must be gg4l or qqZZ" >&2
+    echo "PROCESS must be gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
     exit 2
     ;;
 esac
@@ -371,6 +388,7 @@ events=$EVENTS
 first_event=$FIRST_EVENT
 run_number=$RUN_NUMBER
 ecm_energy_gev=$ECM_ENERGY_GEV
+generator_backend=athgeneration
 athgeneration_release=$ATHGEN_RELEASE
 atlas_project=$ACTUAL_ATLAS_PROJECT
 atlas_version=$ACTUAL_ATLAS_VERSION

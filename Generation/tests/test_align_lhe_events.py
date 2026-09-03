@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -21,6 +22,19 @@ SPEC.loader.exec_module(ALIGNMENT)
 
 SOURCE_IDS = [1, 3, 4, 6, 7, 8]
 SHOWERED_IDS = [1, 3, 6, 7, 8]
+
+
+def test_cli_advertises_all_vpolar_process_modes() -> None:
+    result = subprocess.run(
+        [sys.executable, str(ALIGNER), "--help"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    for process in ("vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"):
+        assert process in result.stdout
 
 
 def lhe_document(source_ids: list[int]) -> str:
@@ -188,6 +202,124 @@ class NamedWeightAlignmentTest(unittest.TestCase):
             "named-weight-id-v1",
         ]
 
+    def standalone_command(self) -> list[str]:
+        payload = json.loads(self.lhe_contract.read_text(encoding="utf-8"))
+        payload["process"] = "vpolar_LL"
+        payload["m4l_min_gev"] = 150.0
+        self.lhe_contract.write_text(
+            json.dumps(payload) + "\n", encoding="utf-8"
+        )
+        cards = {
+            "process": self.root / "madgraph-process-card.dat",
+            "run": self.root / "madgraph-run-card.dat",
+            "param": self.root / "madgraph-param-card.dat",
+            "madloop": self.root / "madgraph-madloop-card.dat",
+            "pythia": self.root / "pythia8-card.cmnd",
+        }
+        cards["process"].write_text(
+            "import model SM_Loop_ZPolar\n"
+            "generate g g > e+ e- mu+ mu- QED=4 QCD=2 "
+            "[noborn = QCD] / a z za zt\n",
+            encoding="utf-8",
+        )
+        cards["run"].write_text(
+            " 8 = nevents ! generated safety events\n"
+            " 17 = iseed ! MadGraph random seed\n",
+            encoding="utf-8",
+        )
+        cards["param"].write_text("BLOCK MASS\n", encoding="utf-8")
+        cards["madloop"].write_text("#MLReductionLib\n1\n", encoding="utf-8")
+        cards["pythia"].write_text(
+            "Random:setSeed = on\nRandom:seed = 17\n", encoding="utf-8"
+        )
+        generation_config = self.root / "generation-config.json"
+        generation_config.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "contract": "oap-vpolar-generation-config-v1",
+                    "generator_backend": (
+                        "madgraph5-pythia8-vpolar-standalone"
+                    ),
+                    "process": "vpolar_LL",
+                    "polarization_component": "LL",
+                    "run_number": 100003,
+                    "ecm_energy_gev": 13600.0,
+                    "requested_events": 5,
+                    "generated_lhe_events": 8,
+                    "matrix_element_seed": 17,
+                    "shower_seed": 17,
+                    "mll_min_gev": 50.0,
+                    "mll_max_gev": 200.0,
+                    "m4l_min_gev": 150.0,
+                    "m4l_max_gev": 3000.0,
+                    "loop_reduction": {
+                        "backend": "CutTools",
+                        "collier": None,
+                        "loop_optimized_output": True,
+                        "madloop_reduction_lib": "1",
+                        "ninja": None,
+                        "output_dependencies": "external",
+                    },
+                    "cards": {
+                        role: {
+                            "path": path.name,
+                            "path_scope": "generation_run_directory",
+                            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        }
+                        for role, path in cards.items()
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        shower_log = self.root / "pythia8.log"
+        shower_log.write_text(
+            "Pythia8 Event generation failed - re-trying.\n", encoding="utf-8"
+        )
+        return [
+            sys.executable,
+            str(ALIGNER),
+            "--lhe-archive",
+            str(self.archive),
+            "--lhe-contract-metadata",
+            str(self.lhe_contract),
+            "--hepmc",
+            str(self.hepmc),
+            "--generator-backend",
+            "madgraph5-pythia8-vpolar-standalone",
+            "--generation-config",
+            str(generation_config),
+            "--shower-log",
+            str(shower_log),
+            "--output",
+            str(self.output),
+            "--metadata",
+            str(self.metadata),
+            "--expected-events",
+            "5",
+            "--expected-m4l-min",
+            "150",
+            "--expected-m4l-max",
+            "3000",
+            "--process",
+            "vpolar_LL",
+            "--run-number",
+            "100003",
+            "--seed",
+            "17",
+            "--matrix-element-seed",
+            "17",
+            "--shower-seed",
+            "17",
+            "--first-event",
+            "101",
+            "--contract",
+            "named-weight-id-v1",
+        ]
+
     def test_matches_named_ids_not_an_lhe_prefix(self) -> None:
         result = subprocess.run(self.command(), text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -219,6 +351,100 @@ class NamedWeightAlignmentTest(unittest.TestCase):
             metadata["files"]["lhe_contract_metadata"]["path"],
             self.lhe_contract.name,
         )
+        self.assertEqual(metadata["schema_version"], 2)
+        self.assertNotIn("generator_backend", metadata)
+        self.assertNotIn("generation_config", metadata["files"])
+        self.assertNotIn("shower_log", metadata["files"])
+
+    def test_standalone_backend_uses_backend_neutral_provenance(self) -> None:
+        result = subprocess.run(
+            self.standalone_command(), text=True, capture_output=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = json.loads(self.metadata.read_text(encoding="utf-8"))
+        self.assertEqual(metadata["schema_version"], 3)
+        self.assertEqual(
+            metadata["generator_backend"],
+            "madgraph5-pythia8-vpolar-standalone",
+        )
+        self.assertNotIn("athgeneration_release", metadata)
+        self.assertNotIn("transform_log_observations", metadata)
+        self.assertEqual(metadata["shower_log_observations"]["pythia_retry"], 1)
+        self.assertEqual(
+            metadata["files"]["generation_config"]["path"],
+            "generation-config.json",
+        )
+        self.assertEqual(metadata["files"]["shower_log"]["path"], "pythia8.log")
+        self.assertEqual(metadata["matrix_element_seed"], 17)
+        self.assertEqual(metadata["shower_seed"], 17)
+        self.assertEqual(
+            metadata["generation_config"]["contract"],
+            "oap-vpolar-generation-config-v1",
+        )
+        self.assertTrue(
+            metadata["contract_conditions"]["generation_config_validated"]
+        )
+        self.assertNotIn("job_option", metadata["files"])
+        self.assertNotIn("transform_log", metadata["files"])
+
+    def test_standalone_backend_rejects_tampered_realized_card(self) -> None:
+        command = self.standalone_command()
+        (self.root / "pythia8-card.cmnd").write_text(
+            "Random:setSeed = on\nRandom:seed = 18\n", encoding="utf-8"
+        )
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("SHA-256 mismatch", result.stderr)
+
+    def test_standalone_backend_rejects_unpinned_loop_reduction(self) -> None:
+        command = self.standalone_command()
+        generation_config = self.root / "generation-config.json"
+        payload = json.loads(generation_config.read_text(encoding="utf-8"))
+        payload["loop_reduction"]["ninja"] = "auto"
+        generation_config.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("optimized CutTools-only reduction", result.stderr)
+
+    def test_standalone_backend_rejects_wrong_madloop_library(self) -> None:
+        command = self.standalone_command()
+        madloop_card = self.root / "madgraph-madloop-card.dat"
+        madloop_card.write_text("#MLReductionLib\n6\n", encoding="utf-8")
+        generation_config = self.root / "generation-config.json"
+        payload = json.loads(generation_config.read_text(encoding="utf-8"))
+        payload["cards"]["madloop"]["sha256"] = hashlib.sha256(
+            madloop_card.read_bytes()
+        ).hexdigest()
+        generation_config.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not select CutTools", result.stderr)
+
+    def test_standalone_backend_rejects_wrong_process_semantics(self) -> None:
+        command = self.standalone_command()
+        process_card = self.root / "madgraph-process-card.dat"
+        process_card.write_text(
+            "import model SM_Loop_ZPolar\n"
+            "generate g g > e+ e- mu+ mu- QED=4 QCD=2 "
+            "[noborn = QCD] / a z z0 za\n",
+            encoding="utf-8",
+        )
+        generation_config = self.root / "generation-config.json"
+        payload = json.loads(generation_config.read_text(encoding="utf-8"))
+        payload["cards"]["process"]["sha256"] = hashlib.sha256(
+            process_card.read_bytes()
+        ).hexdigest()
+        generation_config.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exact exclusive full-eemumu", result.stderr)
+
+    def test_standalone_backend_rejects_athgeneration_inputs(self) -> None:
+        command = self.standalone_command()
+        command.extend(("--release", "23.6.41"))
+        result = subprocess.run(command, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not accept", result.stderr)
 
     def test_rounded_hepmc_weights_decode_at_atlas_job_scale(self) -> None:
         source_id = 100_001

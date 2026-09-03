@@ -1,7 +1,7 @@
 # End-to-end job worker
 
 `run_chain.sh` executes one local job through all three stages and is the
-worker entry point intended for a later HTCondor layer. It keeps the heavy EVNT,
+worker entry point used by the HTCondor layer. It keeps the heavy EVNT,
 LHE, HepMC, and Delphes files in a stage directory while allowing the compact
 analysis ROOT file to be placed separately for transfer.
 
@@ -11,6 +11,10 @@ Before running it:
 2. build Delphes once with `Simulation/install_delphes.sh` in the ROOT
    environment that will run simulation; and
 3. run from a UChicago AF shell/container with ATLAS CVMFS available.
+
+The ATLAS environment in step 3 is required for `gg4l` and `qqZZ`. VPolar
+processes instead require the shared prefix built by
+`Generation/VPolar/install_vpolar.sh`.
 
 Example smoke jobs from the repository root:
 
@@ -22,6 +26,15 @@ Workflow/run_chain.sh gg4l \
 Workflow/run_chain.sh qqZZ \
   --events 10 --seed 201 --job-id 0 --campaign-id 20260902 \
   --output-dir /data/$USER/offshell/smoke/qqZZ_job0
+```
+
+The polarized interface is identical apart from the installation prefix:
+
+```bash
+Workflow/run_chain.sh vpolar_TT \
+  --events 10 --seed 301 --job-id 0 --campaign-id 20260902 \
+  --generator-prefix /data/$USER/offshell/software/vpolar \
+  --output-dir /data/$USER/offshell/smoke/vpolar_TT_job0
 ```
 
 The generation setup runs in a child process, so it cannot contaminate the
@@ -56,7 +69,7 @@ compact outputs and add the LHE truth angular weights with:
 ```bash
 uv run python Merging/merge_analysis_outputs.py \
   --output /data/$USER/offshell/merged/gg4l.root \
-  /data/$USER/offshell/production/gg4l_job*/analysis.root
+  /data/$USER/offshell/production/gg4l/campaign_20260902/job_*/analysis.root
 ```
 
 The merger pools the pre-shower normalization primitives rather than averaging
@@ -65,10 +78,9 @@ pb-normalized nominal weight, and derives all angular factors from each event's
 Born-projected LHE angles. See `Merging/README.md` for the full schema and
 validation contract.
 
-## HTCondor status
+## HTCondor campaigns
 
-The submit description, site resource requests, retries, and file-transfer
-policy are intentionally deferred until small local AF jobs have validated the
-AthGeneration, HepMC, ROOT, and Delphes runtime combination. This script has a
-non-interactive command-line interface so it can become the executable of that
-submission layer without changing the physics stages.
+`UChicagoAF/condor/submit_campaign.py` produces the job table and submit file,
+while `UChicagoAF/condor/worker.sh` invokes this script in execute-node scratch
+and publishes only the compact output and provenance. Submission is opt-in;
+campaign preparation alone does not call `condor_submit`.

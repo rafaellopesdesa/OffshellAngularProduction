@@ -25,7 +25,7 @@ Run the pinned Delphes dressed/reconstruction response on ATLAS HepMC events.
 
 Usage:
   ./run_simulation.sh INPUT [options]
-  ./run_simulation.sh --preflight [--card FILE]
+  ./run_simulation.sh --preflight [--process NAME] [--card FILE]
 
 INPUT may be:
   - a HepMC2 or HepMC3 ASCII file (the filename is unrestricted);
@@ -34,7 +34,8 @@ INPUT may be:
   - one individual jobs/job_* directory.
 
 Options:
-  --process NAME       auto, gg4l, or qqZZ (default: auto from run-metadata.txt)
+  --process NAME       auto, gg4l, qqZZ, or a vpolar_* mode
+                       (default: auto from run-metadata.txt)
   --output-root DIR    Put outputs below DIR/JOB_LABEL instead of beside input
   --card FILE          Override Delphes's bundled delphes_card_ATLAS.tcl
   --random-seed N      Delphes base seed; increments for multiple inputs
@@ -103,10 +104,13 @@ while (($#)); do
   esac
 done
 
-[[ "$PROCESS" == auto || "$PROCESS" == gg4l || "$PROCESS" == qqZZ ]] || {
-  echo "--process must be auto, gg4l, or qqZZ" >&2
-  exit 2
-}
+case "$PROCESS" in
+  auto|gg4l|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
+  *)
+    echo "--process must be auto, gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
+    exit 2
+    ;;
+esac
 if [[ -n "$DELPHES_SEED_OVERRIDE" ]]; then
   valid_delphes_seed "$DELPHES_SEED_OVERRIDE" || {
     echo "--random-seed must be an integer from 1 through 900000000" >&2
@@ -236,7 +240,8 @@ if ((PREFLIGHT)); then
     rm -f -- "$preflight_card"
   }
   trap cleanup_preflight_card EXIT
-  python3 "$SCRIPT_DIR/prepare_dressed_card.py" "$CARD" "$preflight_card"
+  python3 "$SCRIPT_DIR/prepare_dressed_card.py" "$CARD" "$preflight_card" \
+    --process "$PROCESS"
   [[ -s "$preflight_card" ]] || {
     echo "Delphes card preflight produced an empty card" >&2
     exit 1
@@ -327,8 +332,10 @@ validate_delphes_output() {
   local output_file="$1"
   local log_file="$2"
   local expected_events="$3"
+  local require_exact_dressed_2e2mu="$4"
   DELPHES_OUTPUT_FILE="$output_file" \
     DELPHES_EXPECTED_EVENTS="$expected_events" \
+    DELPHES_REQUIRE_EXACT_DRESSED_2E2MU="$require_exact_dressed_2e2mu" \
     root -l -b -q "$SCRIPT_DIR/check_delphes_output.C" >>"$log_file" 2>&1
 }
 
@@ -477,18 +484,36 @@ for input_file in "${INPUT_FILES[@]}"; do
   resolved_process="$PROCESS"
   if [[ "$resolved_process" == auto ]]; then
     resolved_process="$metadata_process"
-    [[ "$resolved_process" == gg4l || "$resolved_process" == qqZZ ]] || {
-      echo "Cannot infer process for $input_file; pass --process gg4l or --process qqZZ." >&2
-      failures=$((failures + 1))
-      continue
-    }
+    case "$resolved_process" in
+      gg4l|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
+      *)
+        echo "Cannot infer a supported process for $input_file; pass --process explicitly." >&2
+        failures=$((failures + 1))
+        continue
+        ;;
+    esac
   elif [[ -n "$metadata_process" && "$metadata_process" != "$resolved_process" ]]; then
     echo "Process mismatch for $input_file: metadata=$metadata_process, option=$resolved_process" >&2
     failures=$((failures + 1))
     continue
   fi
 
-  # Both processes are generated directly in the 2e2mu final state, so no
+  case "$resolved_process" in
+    vpolar_*)
+      dressed_lepton_origin_policy=vpolar_direct_hard_gg_v1
+      dressed_lepton_direct_hard_process_candidates=true
+      dressed_lepton_origin=direct_hard_gg,non_hadronic,exact_signed_e_mu_copy_chain
+      dressed_lepton_exact_2e2mu_required=true
+      ;;
+    *)
+      dressed_lepton_origin_policy=resonant_boson_origin_v1
+      dressed_lepton_direct_hard_process_candidates=false
+      dressed_lepton_origin=W_or_Z_or_gammaStar_mass_gt_5,non_hadronic,direct_e_mu_only
+      dressed_lepton_exact_2e2mu_required=false
+      ;;
+  esac
+
+  # All supported processes are generated directly in the 2e2mu final state, so no
   # decay branching factor is applied here. Pythia's running cross-section
   # fields are retained only as conditional diagnostics; authoritative
   # normalization comes from the pre-shower LHE contract.
@@ -626,7 +651,8 @@ for input_file in "${INPUT_FILES[@]}"; do
   fi
   card_sha256="$CARD_SHA256"
   candidate_card="$work_resolved_card"
-  python3 "$SCRIPT_DIR/prepare_dressed_card.py" "$CARD" "$candidate_card"
+  python3 "$SCRIPT_DIR/prepare_dressed_card.py" "$CARD" "$candidate_card" \
+    --process "$resolved_process"
   {
     printf '\n# Added by OffshellAngularProduction/Simulation/run_simulation.sh\n'
     printf 'set WeightScale 1.0\n'
@@ -641,10 +667,11 @@ for input_file in "${INPUT_FILES[@]}"; do
     if [[ -r "$resolved_card" ]]; then
       existing_card_sha256="$(sha256sum -- "$resolved_card" | awk '{print $1}')"
     fi
-    if validate_delphes_output "$output_file" "$work_log_file" "$expected_events" &&
+    if validate_delphes_output "$output_file" "$work_log_file" "$expected_events" \
+          "$dressed_lepton_exact_2e2mu_required" &&
         [[ "$existing_card_sha256" == "$candidate_card_sha256" ]] &&
         status_matches_current "$status_file" \
-          schema_version 2 \
+          schema_version 3 \
           input_file "$input_file" \
           input_sha256 "$input_sha256" \
           input_sha256_after_processing "$input_sha256" \
@@ -658,6 +685,12 @@ for input_file in "${INPUT_FILES[@]}"; do
           hepmc_format "$format" \
           random_seed "$delphes_seed" \
           weight_scale "$weight_scale" \
+          dressed_lepton_origin "$dressed_lepton_origin" \
+          dressed_lepton_origin_policy "$dressed_lepton_origin_policy" \
+          dressed_lepton_direct_hard_process_candidates \
+            "$dressed_lepton_direct_hard_process_candidates" \
+          dressed_lepton_exact_2e2mu_validated \
+            "$dressed_lepton_exact_2e2mu_required" \
           input_events "$input_events" \
           output_events "$expected_events" \
           delphes_version "$DELPHES_VERSION_ACTUAL" \
@@ -710,7 +743,8 @@ for input_file in "${INPUT_FILES[@]}"; do
     reader_succeeded=1
   fi
   if ((reader_succeeded)) && [[ -s "$work_output_file" ]] &&
-      validate_delphes_output "$work_output_file" "$work_log_file" "$expected_events"; then
+      validate_delphes_output "$work_output_file" "$work_log_file" "$expected_events" \
+        "$dressed_lepton_exact_2e2mu_required"; then
     output_valid=1
   fi
   if input_sha256_after_processing="$(sha256sum -- "$input_file" 2>/dev/null | awk '{print $1}')" &&
@@ -728,7 +762,7 @@ for input_file in "${INPUT_FILES[@]}"; do
   if ((output_valid)) && [[ "$input_sha256_verified_after_processing" == true ]]; then
     output_sha256="$(sha256sum -- "$work_output_file" | awk '{print $1}')"
     {
-      printf 'schema_version=2\n'
+      printf 'schema_version=3\n'
       printf 'input_file=%s\n' "$input_file"
       printf 'input_sha256=%s\n' "$input_sha256"
       printf 'input_sha256_after_processing=%s\n' "$input_sha256_after_processing"
@@ -754,7 +788,12 @@ for input_file in "${INPUT_FILES[@]}"; do
       printf 'event_order_preserved=true\n'
       printf 'event_number_branch=Event.Number\n'
       printf 'dressed_particles=StableParticle(status_1,bare),DressedElectron,DressedMuon\n'
-      printf 'dressed_lepton_origin=W_or_Z_or_gammaStar_mass_gt_5,non_hadronic,direct_e_mu_only\n'
+      printf 'dressed_lepton_origin=%s\n' "$dressed_lepton_origin"
+      printf 'dressed_lepton_origin_policy=%s\n' "$dressed_lepton_origin_policy"
+      printf 'dressed_lepton_direct_hard_process_candidates=%s\n' \
+        "$dressed_lepton_direct_hard_process_candidates"
+      printf 'dressed_lepton_exact_2e2mu_validated=%s\n' \
+        "$dressed_lepton_exact_2e2mu_required"
       printf 'dressed_lepton_tau_decay_chains=false\n'
       printf 'dressed_lepton_photons=non_hadronic_status_1,delta_r_lt_0.1,nearest_unique\n'
       printf 'reco_leptons=RecoElectron,RecoMuon(post_smearing_reco_id_isolation)\n'

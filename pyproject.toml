@@ -24,10 +24,12 @@ packages = ["src/offshell_production"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+python_files = ["test_*.py", "*_tests.py"]
 testpaths = [
     "tests",
     "Analysis/tests",
     "Generation/tests",
+    "Generation/VPolar",
     "Simulation/tests",
     "Merging/tests",
 ]

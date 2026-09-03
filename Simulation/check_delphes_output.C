@@ -8,6 +8,7 @@
 
 #include <cerrno>
 #include <cstdlib>
+#include <cstring>
 
 namespace {
 Long64_t expected_entries() {
@@ -22,6 +23,15 @@ Long64_t expected_entries() {
     return -2;
   }
   return value;
+}
+
+int exact_dressed_2e2mu_requirement() {
+  const char *text = gSystem->Getenv("DELPHES_REQUIRE_EXACT_DRESSED_2E2MU");
+  if (!text || !*text || std::strcmp(text, "false") == 0) return 0;
+  if (std::strcmp(text, "true") == 0) return 1;
+  Error("check_delphes_output",
+        "invalid DELPHES_REQUIRE_EXACT_DRESSED_2E2MU: %s", text);
+  return -1;
 }
 
 bool require_branch(TTree *tree, const char *name) {
@@ -123,6 +133,57 @@ void check_delphes_output() {
       file->Close();
       gSystem->Exit(9);
       return;
+    }
+  }
+
+  const int require_exact_dressed_2e2mu = exact_dressed_2e2mu_requirement();
+  if (require_exact_dressed_2e2mu < 0) {
+    file->Close();
+    gSystem->Exit(12);
+    return;
+  }
+  if (require_exact_dressed_2e2mu) {
+    TLeaf *electron_size = tree->GetLeaf("DressedElectron_size");
+    TLeaf *electron_pid = tree->GetLeaf("DressedElectron.PID");
+    TLeaf *muon_size = tree->GetLeaf("DressedMuon_size");
+    TLeaf *muon_pid = tree->GetLeaf("DressedMuon.PID");
+    if (!electron_size || !electron_pid || !muon_size || !muon_pid) {
+      Error("check_delphes_output", "dressed 2e2mu multiplicity leaves are missing");
+      file->Close();
+      gSystem->Exit(13);
+      return;
+    }
+
+    for (Long64_t entry = 0; entry < entries; ++entry) {
+      tree->GetEntry(entry);
+      int electron_minus = 0;
+      int electron_plus = 0;
+      int muon_minus = 0;
+      int muon_plus = 0;
+      const Long64_t electron_count = electron_size->GetValueLong64();
+      const Long64_t muon_count = muon_size->GetValueLong64();
+      for (Long64_t index = 0; index < electron_count; ++index) {
+        const Long64_t pid = electron_pid->GetValueLong64(index);
+        electron_minus += pid == 11;
+        electron_plus += pid == -11;
+      }
+      for (Long64_t index = 0; index < muon_count; ++index) {
+        const Long64_t pid = muon_pid->GetValueLong64(index);
+        muon_minus += pid == 13;
+        muon_plus += pid == -13;
+      }
+      if (electron_count != 2 || muon_count != 2 || electron_minus != 1 ||
+          electron_plus != 1 || muon_minus != 1 || muon_plus != 1) {
+        Error("check_delphes_output",
+              "entry %lld violates exact dressed e-e+mu-mu+ contract: "
+              "electrons=%lld (PID 11=%d, -11=%d), "
+              "muons=%lld (PID 13=%d, -13=%d)",
+              entry, electron_count, electron_minus, electron_plus, muon_count,
+              muon_minus, muon_plus);
+        file->Close();
+        gSystem->Exit(14);
+        return;
+      }
     }
   }
 

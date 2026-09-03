@@ -1,7 +1,7 @@
 # Off-shell angular production
 
 This repository builds matched off-shell \(ZZ\to e^-e^+\mu^-\mu^+\) samples
-from ATLAS event generation through a compact angular-analysis ROOT tree. It is
+from either ATLAS event generation or standalone VPolarized MadGraph through a compact angular-analysis ROOT tree. It is
 adapted for the UChicago Analysis Facility and combines the production pattern
 of
 [FourLeptonUnfolding](https://github.com/rafaellopesdesa/FourLeptonUnfolding)
@@ -10,8 +10,10 @@ with the Born-projected conventions of
 
 ```mermaid
 flowchart TD
-    G["ATLAS Gen_tf"] --> L["matched LHE"]
-    G --> H["HepMC"]
+    P["ATLAS POWHEG"] --> L["matched LHE"]
+    V["VPolar MadGraph"] --> L
+    P --> H["HepMC"]
+    V --> H
     H --> D["Delphes"]
     L --> A["analysis reducer"]
     D --> A
@@ -20,27 +22,28 @@ flowchart TD
     M --> R["campaign ROOT"]
 ```
 
-The two production modes are:
+The production modes are:
 
 | Sample | Hard process | Generation phase space |
 |---|---|---|
 | `gg4l` | full Higgs + continuum + interference, exclusive `2e2mu` | \(50\leq m_{\ell\ell}\leq200\) GeV, \(150\leq m_{4\ell}\leq3000\) GeV |
 | `qqZZ` | quark-initiated continuum, exclusive `2e2mu` | \(m_{\ell\ell}\geq50\) GeV, \(70\leq m_{4\ell}\leq3000\) GeV at LHE level |
+| `vpolar_LL/TT/TL/LT` | full loop-induced Higgs + continuum + interference in a fixed polarization channel, exclusive `2e2mu` | \(50\leq m_{\ell\ell}\leq200\) GeV, \(150\leq m_{4\ell}\leq3000\) GeV |
 
-Both job options request the exclusive `2e2mu` state and use Pythia8. Herwig
-is not part of the chain.
+Every generation configuration requests the exclusive `2e2mu` state and uses
+Pythia8. Herwig is not part of the chain.
 
 ## Repository map
 
 | Path | Purpose |
 |---|---|
-| `Generation/` | Local ATLAS job options and common `Gen_tf.py` runner |
+| `Generation/` | Common dispatcher, ATLAS cards, and standalone VPolar backend |
 | `Simulation/` | Pinned, patched Delphes response with dressed and RECO leptons |
 | `Analysis/` | Strict LHE/Delphes matcher and compact ROOT writer |
 | `Merging/` | Cross-section-safe campaign merger and LHE truth angular weights |
 | `src/offshell_production/` | Shared Born projection, angles, LHE parsing, and selection |
-| `Workflow/` | One-job end-to-end worker, ready to wrap with HTCondor later |
-| `UChicagoAF/` | UChicago storage/environment guidance and container wrapper |
+| `Workflow/` | One-job end-to-end worker used locally and by HTCondor |
+| `UChicagoAF/` | UChicago runtime guidance, container wrapper, and Condor campaigns |
 | `docs/physics-conventions.md` | Authoritative physics and event-identity contract |
 
 ## Quick start on the UChicago AF
@@ -65,6 +68,20 @@ Then run a small end-to-end validation job:
 Workflow/run_chain.sh gg4l \
   --events 2 --seed 101 --job-id 0 --campaign-id 20260902 \
   --output-dir /data/$USER/offshell/smoke/gg4l_job0
+```
+
+For polarized samples, first build the shared generator stack once, then use
+the same workflow interface:
+
+```bash
+Generation/VPolar/install_vpolar.sh \
+  --prefix /data/$USER/offshell/software/vpolar \
+  --lhapdf-config /path/to/lhapdf-config --cores 8
+
+Workflow/run_chain.sh vpolar_LL \
+  --events 2 --seed 201 --job-id 0 --campaign-id 20260902 \
+  --generator-prefix /data/$USER/offshell/software/vpolar \
+  --output-dir /data/$USER/offshell/smoke/vpolar_LL_job0
 ```
 
 Each stage also has a standalone runner and detailed README. The default
@@ -114,9 +131,10 @@ Normal AF outputs should be placed under `/data/$USER`, as in the example
 above. The repository-local `Generation/runs/...` and `Workflow/runs/...`
 defaults are intended only for smoke tests and other small jobs.
 
-HTCondor submission is intentionally the next layer, after the local AF smoke
-jobs establish the exact runtime combination. `Workflow/run_chain.sh` is
-already structured as its non-interactive worker executable.
+After local smoke tests, `UChicagoAF/condor/submit_campaign.py` prepares
+deterministic shared-filesystem HTCondor campaigns. It supports all six sample
+names, gives jobs disjoint seeds and event-number ranges, and requires the
+shared VPolar prefix for polarized modes. See `UChicagoAF/condor/README.md`.
 
 ## Tests
 
@@ -124,7 +142,8 @@ The unit tests require neither Athena nor ROOT:
 
 ```bash
 uv run --frozen --extra test python -m pytest -q
-bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh
+bash -n Generation/*.sh Generation/VPolar/*.sh Simulation/*.sh \
+  UChicagoAF/*.sh UChicagoAF/condor/*.sh Workflow/*.sh
 ```
 
 Full `Gen_tf.py` and Delphes smoke tests must run on the UChicago AF with CVMFS

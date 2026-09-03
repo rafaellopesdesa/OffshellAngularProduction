@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import subprocess
 import unittest
+from pathlib import Path
 
-from Simulation.prepare_dressed_card import _module_block, prepare_card
+from Simulation.prepare_dressed_card import (
+    VPOLAR_PROCESSES,
+    _module_block,
+    prepare_card,
+)
 
 
 CARD = """
@@ -66,6 +72,7 @@ class PrepareDressedCardTest(unittest.TestCase):
         self.assertIn("set RequireNoHadronAncestor true", result)
         self.assertIn("set RequireNoHadronAncestorCandidate true", result)
         self.assertIn("set RequireBosonAncestorCandidate true", result)
+        self.assertIn("set RequireDirectHardProcessCandidate false", result)
         self.assertIn("set AllowTauDecayCandidate false", result)
         self.assertIn("set VirtualPhotonMinMass 5.0", result)
         self.assertIn("set UniqueAssignment true", result)
@@ -77,6 +84,70 @@ class PrepareDressedCardTest(unittest.TestCase):
             result.index("PromptLeptonDressing\n"), result.index("ParticlePropagator\n")
         )
         self.assertEqual(result.count("StableParticle GenParticle"), 1)
+
+    def test_direct_hard_process_requirement_is_vpolar_only(self):
+        for process in sorted(VPOLAR_PROCESSES):
+            with self.subTest(process=process):
+                result = prepare_card(CARD, process=process)
+                self.assertIn("set RequireBosonAncestorCandidate false", result)
+                self.assertIn("set RequireDirectHardProcessCandidate true", result)
+                self.assertNotIn(
+                    "set RequireDirectHardProcessCandidate false", result
+                )
+
+        for process in ("auto", "gg4l", "qqZZ"):
+            with self.subTest(process=process):
+                result = prepare_card(CARD, process=process)
+                self.assertIn("set RequireBosonAncestorCandidate true", result)
+                self.assertIn("set RequireDirectHardProcessCandidate false", result)
+                self.assertNotIn(
+                    "set RequireDirectHardProcessCandidate true", result
+                )
+
+    def test_rejects_process_names_outside_the_closed_backend_set(self):
+        with self.assertRaisesRegex(ValueError, "unsupported process"):
+            prepare_card(CARD, process="vpolar_full")
+
+    def test_delphes_patch_uses_the_narrow_vpolar_history_anchor(self):
+        patch = (
+            Path(__file__).resolve().parents[1]
+            / "patches"
+            / "delphes-prompt-lepton-origin.patch"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "absolutePID == 230 || absolutePID == 231", patch
+        )
+        self.assertIn(
+            "if(absolutePID == 230 || absolutePID == 231) return false;",
+            patch,
+        )
+        self.assertIn(
+            "(lepton->Status == 1 || lepton->Status == 23)", patch
+        )
+        self.assertIn("mother->PID != 21 || mother->Status != 21", patch)
+        self.assertIn("mother->PID == leptonPID", patch)
+        self.assertIn(
+            "if(fRequireDirectHardProcessCandidate &&", patch
+        )
+        self.assertNotIn(
+            "fRequireBosonAncestorCandidate && !HasBosonAncestor(candidate) &&",
+            patch,
+        )
+        self.assertNotIn(
+            "TMath::Abs(mother->PID) == leptonPID", patch
+        )
+
+    def test_all_delphes_patches_are_valid_unified_diffs(self):
+        patch_directory = Path(__file__).resolve().parents[1] / "patches"
+        for patch in sorted(patch_directory.glob("*.patch")):
+            with self.subTest(patch=patch.name):
+                result = subprocess.run(
+                    ["git", "apply", "--numstat", str(patch)],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_builds_separate_reco_id_and_isolation_response(self):
         result = self.result

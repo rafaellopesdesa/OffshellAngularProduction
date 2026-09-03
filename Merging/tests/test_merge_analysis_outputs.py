@@ -252,6 +252,49 @@ def test_seed_resolved_card_hash_is_job_specific(
     assert embedded == ["e" * 64, resolved]
 
 
+def _downgrade_simulation_metadata_to_legacy_schema_two(path: Path) -> None:
+    with uproot.open(path) as root_file:
+        metadata = json.loads(str(root_file["analysis_metadata"]))
+    simulation = metadata["provenance"]["simulation"]
+    simulation["schema_version"] = 2
+    for key in (
+        "dressed_lepton_origin",
+        "dressed_lepton_origin_policy",
+        "dressed_lepton_direct_hard_process_candidates",
+        "dressed_lepton_exact_2e2mu_validated",
+    ):
+        simulation.pop(key, None)
+    _replace_analysis_metadata(path, metadata)
+
+
+def test_legacy_simulation_schema_two_jobs_remain_mergeable(
+    tmp_path: Path,
+    two_job_inputs: tuple[JobSpec, JobSpec],
+):
+    first, second = two_job_inputs
+    _downgrade_simulation_metadata_to_legacy_schema_two(first.path)
+    _downgrade_simulation_metadata_to_legacy_schema_two(second.path)
+
+    merge_analysis_outputs(
+        [first.path, second.path], tmp_path / "legacy-schema-two.root"
+    )
+
+
+def test_rejects_mixing_legacy_and_strong_simulation_origin_contracts(
+    tmp_path: Path,
+    two_job_inputs: tuple[JobSpec, JobSpec],
+):
+    first, second = two_job_inputs
+    _downgrade_simulation_metadata_to_legacy_schema_two(second.path)
+
+    with pytest.raises(
+        ProvenanceError, match="incompatible physics/provenance invariants"
+    ):
+        merge_analysis_outputs(
+            [first.path, second.path], tmp_path / "mixed-origin-contract.root"
+        )
+
+
 def test_rejects_nonfinite_lhe_angle_marked_projection_valid(tmp_path: Path):
     normalization = Normalization(4, 2, 2.0, 3.0, 3.0, 1.0, 2.0, 2.0)
     bad = write_job(

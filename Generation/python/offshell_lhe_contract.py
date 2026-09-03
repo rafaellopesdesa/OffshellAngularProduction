@@ -285,8 +285,19 @@ def prepare_lhe_for_shower(
     requested_events = int(requested_events)
     min_m4l = float(min_m4l)
     max_m4l = float(max_m4l)
-    if process not in {"gg4l", "qqZZ"}:
-        raise LHEContractError("process must be gg4l or qqZZ")
+    supported_processes = {
+        "gg4l",
+        "qqZZ",
+        "vpolar_LL",
+        "vpolar_TT",
+        "vpolar_TL",
+        "vpolar_LT",
+    }
+    if process not in supported_processes:
+        raise LHEContractError(
+            "process must be gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, "
+            "or vpolar_LT"
+        )
     if requested_events < 1:
         raise LHEContractError("requested_events must be positive")
     if not (0.0 <= min_m4l < max_m4l and math.isfinite(max_m4l)):

@@ -152,16 +152,19 @@ def test_rejects_nonfinite_lepton_momentum(tmp_path: Path):
         )
 
 
-def test_rejects_non_minus_four_lhe_weighting_strategy(tmp_path: Path):
+@pytest.mark.parametrize("process", ("gg4l", "vpolar_LL"))
+def test_rejects_non_minus_four_lhe_weighting_strategy(
+    tmp_path: Path, process: str
+):
     lhe = tmp_path / "LHE.TXT.events"
     archive = tmp_path / "LHE.TXT.tar.gz"
-    invalid = _document([_event(200.0)]).replace(" 0 0 -4 1", " 0 0 3 1")
+    invalid = _document([_event(200.0)]).replace(" 0 0 -4 1", " 0 0 4 1")
     lhe.write_text(invalid)
     with pytest.raises(CONTRACT.LHEContractError, match="IDWTUP=-4"):
         CONTRACT.prepare_lhe_for_shower(
             lhe,
             archive,
-            process="gg4l",
+            process=process,
             requested_events=1,
             min_m4l=150.0,
             max_m4l=3000.0,
@@ -186,3 +189,26 @@ def test_single_generated_event_has_undefined_mc_error(tmp_path: Path):
     assert result["filtered_cross_section_pb"] == pytest.approx(-2.0)
     assert result["inclusive_cross_section_mc_error_pb"] is None
     assert result["filtered_cross_section_mc_error_pb"] is None
+
+
+@pytest.mark.parametrize(
+    "process",
+    ("vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"),
+)
+def test_accepts_vpolar_process_modes(tmp_path: Path, process: str):
+    lhe = tmp_path / "LHE.TXT.events"
+    archive = tmp_path / "LHE.TXT.tar.gz"
+    lhe.write_text(_document([_event(200.0)]))
+
+    result = CONTRACT.prepare_lhe_for_shower(
+        lhe,
+        archive,
+        process=process,
+        requested_events=1,
+        min_m4l=150.0,
+        max_m4l=3000.0,
+        metadata_path=tmp_path / "metadata.json",
+    )
+
+    assert result["process"] == process
+    assert archive.is_file()

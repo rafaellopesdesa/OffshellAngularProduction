@@ -11,6 +11,20 @@ import argparse
 from pathlib import Path
 
 
+SUPPORTED_PROCESSES = (
+    "auto",
+    "gg4l",
+    "qqZZ",
+    "vpolar_LL",
+    "vpolar_TT",
+    "vpolar_TL",
+    "vpolar_LT",
+)
+VPOLAR_PROCESSES = frozenset(
+    process for process in SUPPORTED_PROCESSES if process.startswith("vpolar_")
+)
+
+
 def _module_block(text: str, declaration: str) -> tuple[int, int, str]:
     start = text.find(declaration)
     if start < 0:
@@ -108,6 +122,10 @@ module LeptonDressing PromptLeptonDressing {
   set RequireNoHadronAncestor true
   set RequireNoHadronAncestorCandidate true
   set RequireBosonAncestorCandidate true
+  # This requirement is enabled only by the VPolar backend. It recognizes an
+  # LHE hard lepton whose same-flavour HepMC chain terminates on two incoming
+  # status-21 gluons; the legacy generators continue to require a boson.
+  set RequireDirectHardProcessCandidate false
   # Generation is restricted to the direct e-e+mu-mu+ final state. Do not
   # promote secondary e/mu from tau decays into the dressed hard-process set.
   set AllowTauDecayCandidate false
@@ -343,7 +361,7 @@ def _add_output_branches(text: str) -> str:
     text = _insert_after(
         text,
         "  add Branch Delphes/stableParticles StableParticle GenParticle\n",
-        "  # Direct W/Z/gamma*-origin leptons dressed with eligible status-1 photons.\n"
+        "  # Backend-selected hard-process leptons dressed with eligible status-1 photons.\n"
         "  add Branch DressedElectronFilter/electrons DressedElectron GenParticle\n"
         "  add Branch DressedMuonFilter/muons DressedMuon GenParticle\n",
     )
@@ -363,10 +381,26 @@ def _add_output_branches(text: str) -> str:
     return text
 
 
-def prepare_card(text: str) -> str:
+def prepare_card(text: str, *, process: str = "auto") -> str:
     """Return the off-shell dressed/reco variant of a bundled ATLAS card."""
 
+    if process not in SUPPORTED_PROCESSES:
+        raise ValueError(f"unsupported process: {process}")
+
     text = _add_dressed_lepton_modules(text)
+    if process in VPOLAR_PROCESSES:
+        text = _replace_in_module(
+            text,
+            "module LeptonDressing PromptLeptonDressing {",
+            "  set RequireBosonAncestorCandidate true\n",
+            "  set RequireBosonAncestorCandidate false\n",
+        )
+        text = _replace_in_module(
+            text,
+            "module LeptonDressing PromptLeptonDressing {",
+            "  set RequireDirectHardProcessCandidate false\n",
+            "  set RequireDirectHardProcessCandidate true\n",
+        )
     text = _configure_jets(text)
     text = _add_output_branches(text)
 
@@ -383,10 +417,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_card", type=Path)
     parser.add_argument("output_card", type=Path)
+    parser.add_argument(
+        "--process",
+        choices=SUPPORTED_PROCESSES,
+        default="auto",
+        help="select the backend-specific prompt-lepton origin policy",
+    )
     args = parser.parse_args()
 
     source = args.input_card.read_text(encoding="utf-8")
-    args.output_card.write_text(prepare_card(source), encoding="utf-8")
+    args.output_card.write_text(
+        prepare_card(source, process=args.process), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

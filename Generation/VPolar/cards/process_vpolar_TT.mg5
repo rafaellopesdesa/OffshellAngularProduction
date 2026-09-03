@@ -1,0 +1,5 @@
+# Exclusive e+ e- mu+ mu-; full loop-induced Higgs + box amplitude.
+set loop_optimized_output True
+import model SM_Loop_ZPolar
+generate g g > e+ e- mu+ mu- QED=4 QCD=2 [noborn = QCD] / a z z0 za
+output processes/vpolar_TT -f

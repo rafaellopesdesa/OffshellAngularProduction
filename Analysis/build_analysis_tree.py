@@ -53,10 +53,40 @@ TREE_NAME = "Events"
 RUN_TREE_NAME = "Runs"
 SCHEMA_VERSION = 2
 UID_SCHEMA_TAG = b"OffshellAngularProduction.Events.v2\0"
-SAMPLE_CODES = {"gg4l": 0, "qqZZ": 1}
+SAMPLE_CODES = {
+    "gg4l": 0,
+    "qqZZ": 1,
+    "vpolar_LL": 10,
+    "vpolar_TT": 11,
+    "vpolar_TL": 12,
+    "vpolar_LT": 13,
+}
 MARKER_ID_WEIGHT_NAME = "AUX_OAP_EVENT_ID"
 MARKER_UNIT_WEIGHT_NAME = "AUX_OAP_EVENT_UNIT"
 ALIGNMENT_CONTRACT = "named-weight-id-v1"
+ATHGENERATION_BACKEND = "athgeneration"
+STANDALONE_GENERATOR_BACKEND = "madgraph5-pythia8-vpolar-standalone"
+LEGACY_DRESSED_ORIGIN = (
+    "W_or_Z_or_gammaStar_mass_gt_5,non_hadronic,direct_e_mu_only"
+)
+VPOLAR_DRESSED_ORIGIN = (
+    "direct_hard_gg,non_hadronic,exact_signed_e_mu_copy_chain"
+)
+LEGACY_DRESSED_ORIGIN_POLICY = "resonant_boson_origin_v1"
+VPOLAR_DRESSED_ORIGIN_POLICY = "vpolar_direct_hard_gg_v1"
+LEGACY_ALIGNMENT_SCHEMA = 2
+STANDALONE_ALIGNMENT_SCHEMA = 3
+GENERATION_CONFIG_SCHEMA = 1
+GENERATION_CONFIG_CONTRACT = "oap-vpolar-generation-config-v1"
+GENERATION_CONFIG_CARD_ROLES = ("process", "run", "param", "madloop", "pythia")
+VPOLAR_LOOP_REDUCTION = {
+    "backend": "CutTools",
+    "collier": None,
+    "loop_optimized_output": True,
+    "madloop_reduction_lib": "1",
+    "ninja": None,
+    "output_dependencies": "external",
+}
 NORMALIZATION_CONTRACT = "idwtup-minus4-sample-mean-v1"
 CROSS_SECTION_METHOD = (
     "mean nominal LHE weight; rejected events assigned zero for filtered estimate"
@@ -286,6 +316,46 @@ def _nested(mapping: Mapping[str, Any], path: Sequence[str], label: str) -> Any:
     return current
 
 
+def _resolve_generation_artifact(
+    generation_metadata_path: Path, declared_path: Any, label: str
+) -> Path:
+    """Resolve one hash-bound plain filename in the generation run directory."""
+
+    if not isinstance(declared_path, str) or not declared_path:
+        raise ProvenanceError(f"{label} must be a non-empty file name")
+    relative = Path(declared_path)
+    if relative.is_absolute() or relative.name != declared_path:
+        raise ProvenanceError(f"{label} must be a plain file name")
+    generation_directory = generation_metadata_path.parent.resolve()
+    resolved = (generation_directory / relative).resolve()
+    if resolved.parent != generation_directory:
+        raise ProvenanceError(f"{label} resolves outside the generation run directory")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"{label} does not exist: {resolved}")
+    return resolved
+
+
+def _madloop_reduction_value(path: Path) -> str:
+    """Read the explicitly selected MadLoop reduction-library identifier."""
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    markers = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip().lower() == "#mlreductionlib"
+    ]
+    if len(markers) != 1 or markers[0] + 1 >= len(lines):
+        raise ProvenanceError(
+            "standalone MadLoop card must contain one #MLReductionLib entry"
+        )
+    value = lines[markers[0] + 1].strip()
+    if value.startswith("!") or not value:
+        raise ProvenanceError(
+            "standalone MadLoop card does not explicitly select a reduction library"
+        )
+    return value
+
+
 def _expect_equal(label: str, values: Mapping[str, Any]) -> Any:
     iterator = iter(values.items())
     _first_name, first_value = next(iterator)
@@ -447,20 +517,195 @@ def load_and_validate_provenance(
             "supported": 2,
         },
     )
-    _expect_equal(
-        "alignment metadata schema version",
-        {
-            "metadata": _metadata_int(alignment, "schema_version", "alignment"),
-            "supported": 2,
-        },
+    alignment_schema = _metadata_int(alignment, "schema_version", "alignment")
+    if alignment_schema == LEGACY_ALIGNMENT_SCHEMA:
+        generator_backend = ATHGENERATION_BACKEND
+        declared_generation_backend = generation_raw.get("generator_backend")
+        if declared_generation_backend not in (None, ATHGENERATION_BACKEND):
+            raise ProvenanceError(
+                "legacy alignment metadata cannot describe generator backend "
+                f"{declared_generation_backend!r}"
+            )
+        if "generator_backend" in alignment:
+            raise ProvenanceError(
+                "legacy alignment metadata must not declare generator_backend"
+            )
+    elif alignment_schema == STANDALONE_ALIGNMENT_SCHEMA:
+        generator_backend = str(
+            _required(alignment, "generator_backend", "alignment")
+        )
+        generation_backend = str(
+            _required(generation_raw, "generator_backend", "generation")
+        )
+        _expect_equal(
+            "generator backend",
+            {
+                "generation": generation_backend,
+                "alignment": generator_backend,
+                "supported": STANDALONE_GENERATOR_BACKEND,
+            },
+        )
+        if (
+            "athgeneration_release" in generation_raw
+            or "athgeneration_release" in alignment
+        ):
+            raise ProvenanceError(
+                "standalone provenance must not declare an AthGeneration release"
+            )
+    else:
+        raise ProvenanceError(
+            "alignment metadata schema version mismatch: "
+            f"metadata={alignment_schema!r}, supported="
+            f"{LEGACY_ALIGNMENT_SCHEMA!r} or {STANDALONE_ALIGNMENT_SCHEMA!r}"
+        )
+    simulation_schema = _metadata_int(
+        simulation_raw, "schema_version", "simulation"
     )
-    _expect_equal(
-        "simulation metadata schema version",
-        {
-            "metadata": _metadata_int(simulation_raw, "schema_version", "simulation"),
-            "supported": 2,
-        },
-    )
+    if simulation_schema not in {2, 3}:
+        raise ProvenanceError(
+            "simulation metadata schema version mismatch: "
+            f"metadata={simulation_schema!r}, supported=2 or 3"
+        )
+    if simulation_schema == 2 and generator_backend != ATHGENERATION_BACKEND:
+        raise ProvenanceError(
+            "simulation metadata schema 2 is supported only for legacy "
+            "AthGeneration inputs"
+        )
+
+    generation_config: dict[str, Any] | None = None
+    generation_config_card_hashes: dict[str, str] = {}
+    if generator_backend == STANDALONE_GENERATOR_BACKEND:
+        paths["generation_config"] = _resolve_generation_artifact(
+            paths["generation_metadata"],
+            _required(generation_raw, "generation_config", "generation"),
+            "generation.generation_config",
+        )
+        paths["shower_log"] = _resolve_generation_artifact(
+            paths["generation_metadata"],
+            _required(generation_raw, "shower_log", "generation"),
+            "generation.shower_log",
+        )
+        try:
+            generation_config_value = json.loads(
+                paths["generation_config"].read_text(encoding="utf-8")
+            )
+        except json.JSONDecodeError as exc:
+            raise ProvenanceError("standalone generation config is not valid JSON") from exc
+        if not isinstance(generation_config_value, dict):
+            raise ProvenanceError("standalone generation config must be a JSON object")
+        generation_config = generation_config_value
+        _expect_equal(
+            "standalone generation-config schema version",
+            {
+                "config": _metadata_int(
+                    generation_config, "schema_version", "generation config"
+                ),
+                "supported": GENERATION_CONFIG_SCHEMA,
+            },
+        )
+        _expect_equal(
+            "standalone generation-config contract",
+            {
+                "config": str(
+                    _required(generation_config, "contract", "generation config")
+                ),
+                "supported": GENERATION_CONFIG_CONTRACT,
+            },
+        )
+        _expect_equal(
+            "standalone generation-config backend",
+            {
+                "config": str(
+                    _required(
+                        generation_config, "generator_backend", "generation config"
+                    )
+                ),
+                "generation": str(
+                    _required(generation_raw, "generator_backend", "generation")
+                ),
+                "alignment": generator_backend,
+            },
+        )
+        if generation_config.get("loop_reduction") != VPOLAR_LOOP_REDUCTION:
+            raise ProvenanceError(
+                "standalone generation config does not use the required optimized "
+                "CutTools-only reduction"
+            )
+        _expect_equal(
+            "standalone loop-reduction backend",
+            {
+                "generation": str(
+                    _required(
+                        generation_raw, "loop_reduction_backend", "generation"
+                    )
+                ),
+                "required": "CutTools",
+            },
+        )
+        _expect_equal(
+            "standalone loop-optimized output",
+            {
+                "generation": _metadata_bool(
+                    generation_raw, "loop_optimized_output", "generation"
+                ),
+                "required": True,
+            },
+        )
+        _expect_equal(
+            "standalone MadLoop reduction library",
+            {
+                "generation": _metadata_int(
+                    generation_raw, "madloop_reduction_lib", "generation"
+                ),
+                "required": 1,
+            },
+        )
+        for key in ("ninja_enabled", "collier_enabled"):
+            _expect_equal(
+                f"standalone {key}",
+                {
+                    "generation": _metadata_bool(generation_raw, key, "generation"),
+                    "required": False,
+                },
+            )
+        _expect_equal(
+            "standalone loop dependency mode",
+            {
+                "generation": str(
+                    _required(
+                        generation_raw, "loop_output_dependencies", "generation"
+                    )
+                ),
+                "required": "external",
+            },
+        )
+        config_cards = _required(generation_config, "cards", "generation config")
+        if not isinstance(config_cards, Mapping):
+            raise ProvenanceError("generation config cards must be an object")
+        seen_card_paths: set[Path] = set()
+        for role in GENERATION_CONFIG_CARD_ROLES:
+            record = _required(config_cards, role, "generation config.cards")
+            if not isinstance(record, Mapping):
+                raise ProvenanceError(
+                    f"generation config.cards.{role} must be an object"
+                )
+            if record.get("path_scope") != "generation_run_directory":
+                raise ProvenanceError(
+                    f"generation config.cards.{role}.path_scope is unsupported"
+                )
+            artifact_name = f"generation_{role}_card"
+            paths[artifact_name] = _resolve_generation_artifact(
+                paths["generation_metadata"],
+                _required(record, "path", f"generation config.cards.{role}"),
+                f"generation config.cards.{role}.path",
+            )
+            if paths[artifact_name] in seen_card_paths:
+                raise ProvenanceError("generation config card paths must be distinct")
+            seen_card_paths.add(paths[artifact_name])
+            generation_config_card_hashes[role] = _sha256_value(
+                _required(record, "sha256", f"generation config.cards.{role}"),
+                f"generation config.cards.{role}.sha256",
+            )
 
     actual_hashes = {name: sha256_file(path) for name, path in paths.items()}
     matched_lhe_sha = _sha256_value(
@@ -471,10 +716,114 @@ def load_and_validate_provenance(
         _nested(alignment, ("files", "hepmc", "sha256"), "alignment"),
         "alignment.files.hepmc.sha256",
     )
-    job_option_sha = _sha256_value(
-        _nested(alignment, ("files", "job_option", "sha256"), "alignment"),
-        "alignment.files.job_option.sha256",
-    )
+    alignment_files = _required(alignment, "files", "alignment")
+    if not isinstance(alignment_files, Mapping):
+        raise ProvenanceError("alignment.files must be an object")
+    if generator_backend == ATHGENERATION_BACKEND:
+        job_option_sha = _sha256_value(
+            _nested(alignment, ("files", "job_option", "sha256"), "alignment"),
+            "alignment.files.job_option.sha256",
+        )
+        generation_config_sha = None
+        shower_log_sha = None
+    else:
+        legacy_file_records = {"job_option", "transform_log"}.intersection(
+            alignment_files
+        )
+        if legacy_file_records:
+            raise ProvenanceError(
+                "standalone alignment metadata contains AthGeneration file "
+                f"records: {sorted(legacy_file_records)}"
+            )
+        job_option_sha = None
+        generation_config_sha = _sha256_value(
+            _nested(
+                alignment,
+                ("files", "generation_config", "sha256"),
+                "alignment",
+            ),
+            "alignment.files.generation_config.sha256",
+        )
+        shower_log_sha = _sha256_value(
+            _nested(alignment, ("files", "shower_log", "sha256"), "alignment"),
+            "alignment.files.shower_log.sha256",
+        )
+        assert generation_config is not None
+        embedded_generation_config = _required(
+            alignment, "generation_config", "alignment"
+        )
+        if embedded_generation_config != generation_config:
+            raise ProvenanceError(
+                "alignment generation-config snapshot disagrees with its bound file"
+            )
+        for record_name, generation_key in (
+            ("generation_config", "generation_config"),
+            ("shower_log", "shower_log"),
+        ):
+            record = _required(alignment_files, record_name, "alignment.files")
+            if not isinstance(record, Mapping):
+                raise ProvenanceError(
+                    f"alignment.files.{record_name} must be an object"
+                )
+            _expect_equal(
+                f"{record_name} file name",
+                {
+                    "generation": str(
+                        _required(generation_raw, generation_key, "generation")
+                    ),
+                    "alignment": str(
+                        _required(record, "path", f"alignment.files.{record_name}")
+                    ),
+                },
+            )
+            if record.get("path_scope") != "generation_run_directory":
+                raise ProvenanceError(
+                    f"alignment.files.{record_name}.path_scope is unsupported"
+                )
+        if (
+            _madloop_reduction_value(paths["generation_madloop_card"])
+            != VPOLAR_LOOP_REDUCTION["madloop_reduction_lib"]
+        ):
+            raise ProvenanceError(
+                "standalone MadLoop card does not select CutTools reduction library 1"
+            )
+        _expect_equal(
+            "standalone generation-config SHA-256",
+            {
+                "actual": actual_hashes["generation_config"],
+                "generation": _sha256_value(
+                    _required(
+                        generation_raw, "generation_config_sha256", "generation"
+                    ),
+                    "generation.generation_config_sha256",
+                ),
+                "alignment": generation_config_sha,
+            },
+        )
+        _expect_equal(
+            "standalone shower-log SHA-256",
+            {
+                "actual": actual_hashes["shower_log"],
+                "generation": _sha256_value(
+                    _required(generation_raw, "shower_log_sha256", "generation"),
+                    "generation.shower_log_sha256",
+                ),
+                "alignment": shower_log_sha,
+            },
+        )
+        for role in GENERATION_CONFIG_CARD_ROLES:
+            generation_hash_key = f"{role}_card_sha256"
+            _expect_equal(
+                f"standalone {role} card SHA-256",
+                {
+                    "actual": actual_hashes[f"generation_{role}_card"],
+                    "generation": _sha256_value(
+                        _required(generation_raw, generation_hash_key, "generation"),
+                        f"generation.{generation_hash_key}",
+                    ),
+                    "config": generation_config_card_hashes[role],
+                },
+            )
     lhe_contract_metadata_sha = _sha256_value(
         _nested(
             alignment,
@@ -546,8 +895,104 @@ def load_and_validate_provenance(
             "LHE_contract": lhe_contract_process,
             "alignment": alignment_process,
             "simulation": simulation_process,
+            **(
+                {
+                    "generation_config": str(
+                        _required(
+                            generation_config, "process", "generation config"
+                        )
+                    )
+                }
+                if generation_config is not None
+                else {}
+            ),
         },
     )
+    if (
+        generator_backend == STANDALONE_GENERATOR_BACKEND
+        and not generation_process.startswith("vpolar_")
+    ):
+        raise ProvenanceError(
+            "the standalone VPolar backend requires a vpolar_* process"
+        )
+    if generator_backend == STANDALONE_GENERATOR_BACKEND:
+        assert generation_config is not None
+        expected_component = generation_process.removeprefix("vpolar_")
+        _expect_equal(
+            "polarization component",
+            {
+                "process": expected_component,
+                "generation": str(
+                    _required(
+                        generation_raw, "polarization_component", "generation"
+                    )
+                ),
+                "generation_config": str(
+                    _required(
+                        generation_config,
+                        "polarization_component",
+                        "generation config",
+                    )
+                ),
+            },
+        )
+
+    if simulation_schema == 3:
+        vpolar_origin_policy = generator_backend == STANDALONE_GENERATOR_BACKEND
+        _expect_equal(
+            "dressed-lepton origin policy",
+            {
+                "simulation": str(
+                    _required(
+                        simulation_raw,
+                        "dressed_lepton_origin_policy",
+                        "simulation",
+                    )
+                ),
+                "required": (
+                    VPOLAR_DRESSED_ORIGIN_POLICY
+                    if vpolar_origin_policy
+                    else LEGACY_DRESSED_ORIGIN_POLICY
+                ),
+            },
+        )
+        _expect_equal(
+            "dressed-lepton origin definition",
+            {
+                "simulation": str(
+                    _required(
+                        simulation_raw, "dressed_lepton_origin", "simulation"
+                    )
+                ),
+                "required": (
+                    VPOLAR_DRESSED_ORIGIN
+                    if vpolar_origin_policy
+                    else LEGACY_DRESSED_ORIGIN
+                ),
+            },
+        )
+        _expect_equal(
+            "direct-hard dressed-lepton requirement",
+            {
+                "simulation": _metadata_bool(
+                    simulation_raw,
+                    "dressed_lepton_direct_hard_process_candidates",
+                    "simulation",
+                ),
+                "required": vpolar_origin_policy,
+            },
+        )
+        _expect_equal(
+            "exact dressed 2e2mu validation",
+            {
+                "simulation": _metadata_bool(
+                    simulation_raw,
+                    "dressed_lepton_exact_2e2mu_validated",
+                    "simulation",
+                ),
+                "required": vpolar_origin_policy,
+            },
+        )
 
     generation_seed = _metadata_int(generation_raw, "seed", "generation")
     alignment_seed = _metadata_int(alignment, "random_seed", "alignment")
@@ -562,6 +1007,40 @@ def load_and_validate_provenance(
             "simulation": simulation_generation_seed,
         },
     )
+    matrix_element_seed = None
+    shower_seed = None
+    if generator_backend == STANDALONE_GENERATOR_BACKEND:
+        assert generation_config is not None
+        matrix_element_seed = _metadata_int(
+            generation_raw, "matrix_element_seed", "generation"
+        )
+        shower_seed = _metadata_int(generation_raw, "shower_seed", "generation")
+        _expect_equal(
+            "matrix-element seed",
+            {
+                "public_generation_seed": generation_seed,
+                "generation": matrix_element_seed,
+                "alignment": _metadata_int(
+                    alignment, "matrix_element_seed", "alignment"
+                ),
+                "generation_config": _metadata_int(
+                    generation_config,
+                    "matrix_element_seed",
+                    "generation config",
+                ),
+            },
+        )
+        _expect_equal(
+            "shower seed",
+            {
+                "public_generation_seed": generation_seed,
+                "generation": shower_seed,
+                "alignment": _metadata_int(alignment, "shower_seed", "alignment"),
+                "generation_config": _metadata_int(
+                    generation_config, "shower_seed", "generation config"
+                ),
+            },
+        )
 
     generation_events = _metadata_int(generation_raw, "events", "generation")
     lhe_contract_requested_events = _metadata_int(
@@ -585,6 +1064,10 @@ def load_and_validate_provenance(
             simulation_raw, "output_events", "simulation"
         ),
     }
+    if generation_config is not None:
+        count_values["generation_config"] = _metadata_int(
+            generation_config, "requested_events", "generation config"
+        )
     expected_events = int(_expect_equal("event count", count_values))
     if expected_events <= 0:
         raise ProvenanceError("event count must be positive")
@@ -603,17 +1086,32 @@ def load_and_validate_provenance(
     alignment_run_number = _metadata_int(alignment, "run_number", "alignment")
     _expect_equal(
         "run number",
-        {"generation": generation_run_number, "alignment": alignment_run_number},
+        {
+            "generation": generation_run_number,
+            "alignment": alignment_run_number,
+            **(
+                {
+                    "generation_config": _metadata_int(
+                        generation_config, "run_number", "generation config"
+                    )
+                }
+                if generation_config is not None
+                else {}
+            ),
+        },
     )
-    generation_release = str(
-        _required(generation_raw, "athgeneration_release", "generation")
-    )
-    alignment_release = str(_required(alignment, "athgeneration_release", "alignment"))
-    _expect_equal(
-        "AthGeneration release",
-        {"generation": generation_release, "alignment": alignment_release},
-    )
-    _release_triplet(generation_release, "AthGeneration release")
+    if generator_backend == ATHGENERATION_BACKEND:
+        generation_release = str(
+            _required(generation_raw, "athgeneration_release", "generation")
+        )
+        alignment_release = str(
+            _required(alignment, "athgeneration_release", "alignment")
+        )
+        _expect_equal(
+            "AthGeneration release",
+            {"generation": generation_release, "alignment": alignment_release},
+        )
+        _release_triplet(generation_release, "AthGeneration release")
 
     generation_contract = str(
         _required(generation_raw, "alignment_contract", "generation")
@@ -714,6 +1212,15 @@ def load_and_validate_provenance(
             "LHE_contract": _metadata_float(
                 lhe_contract, "m4l_min_gev", "LHE contract"
             ),
+            **(
+                {
+                    "generation_config": _metadata_float(
+                        generation_config, "m4l_min_gev", "generation config"
+                    )
+                }
+                if generation_config is not None
+                else {}
+            ),
         },
     )
     _expect_equal(
@@ -723,8 +1230,51 @@ def load_and_validate_provenance(
             "LHE_contract": _metadata_float(
                 lhe_contract, "m4l_max_gev", "LHE contract"
             ),
+            **(
+                {
+                    "generation_config": _metadata_float(
+                        generation_config, "m4l_max_gev", "generation config"
+                    )
+                }
+                if generation_config is not None
+                else {}
+            ),
         },
     )
+    if generation_config is not None:
+        _expect_equal(
+            "generator center-of-mass energy",
+            {
+                "generation": _metadata_float(
+                    generation_raw, "ecm_energy_gev", "generation"
+                ),
+                "generation_config": _metadata_float(
+                    generation_config, "ecm_energy_gev", "generation config"
+                ),
+            },
+        )
+        _expect_equal(
+            "generator dilepton-mass minimum",
+            {
+                "generation": _metadata_float(
+                    generation_raw, "generator_mll_min_gev", "generation"
+                ),
+                "generation_config": _metadata_float(
+                    generation_config, "mll_min_gev", "generation config"
+                ),
+            },
+        )
+        _expect_equal(
+            "generator dilepton-mass maximum",
+            {
+                "generation": _metadata_float(
+                    generation_raw, "generator_mll_max_gev", "generation"
+                ),
+                "generation_config": _metadata_float(
+                    generation_config, "mll_max_gev", "generation config"
+                ),
+            },
+        )
     signed_phase_space_efficiency = _metadata_optional_float(
         lhe_contract, "signed_filter_efficiency", "LHE contract"
     )
@@ -785,6 +1335,17 @@ def load_and_validate_provenance(
             "LHE_contract": generated_lhe_events,
             "alignment": _metadata_int(
                 counts, "generated_lhe_events", "alignment.counts"
+            ),
+            **(
+                {
+                    "generation_config": _metadata_int(
+                        generation_config,
+                        "generated_lhe_events",
+                        "generation config",
+                    )
+                }
+                if generation_config is not None
+                else {}
             ),
         },
     )
@@ -1035,6 +1596,35 @@ def load_and_validate_provenance(
         "alignment.contract_conditions",
     ):
         raise ProvenanceError("alignment did not validate increasing source IDs")
+    if generator_backend == STANDALONE_GENERATOR_BACKEND:
+        if not _metadata_bool(
+            alignment_conditions,
+            "generation_config_validated",
+            "alignment.contract_conditions",
+        ):
+            raise ProvenanceError(
+                "alignment did not validate the standalone generation config"
+            )
+        assert generation_config is not None
+        run_card_validation = _required(
+            generation_config, "run_card_validation", "generation config"
+        )
+        if not isinstance(run_card_validation, Mapping):
+            raise ProvenanceError(
+                "generation config.run_card_validation must be an object"
+            )
+        for key in (
+            "exact_contract_checked",
+            "automatic_pt_eta_dr_cuts_disabled",
+        ):
+            if not _metadata_bool(
+                run_card_validation,
+                key,
+                "generation config.run_card_validation",
+            ):
+                raise ProvenanceError(
+                    f"standalone generation config did not validate {key}"
+                )
     if not _metadata_bool(simulation_raw, "event_retention_validated", "simulation"):
         raise ProvenanceError("simulation did not validate event retention")
     if not _metadata_bool(simulation_raw, "event_order_preserved", "simulation"):
@@ -1075,6 +1665,9 @@ def load_and_validate_provenance(
             "events",
             "first_event",
             "run_number",
+            "matrix_element_seed",
+            "shower_seed",
+            "madloop_reduction_lib",
         },
         float_keys={
             "ecm_energy_gev",
@@ -1105,9 +1698,22 @@ def load_and_validate_provenance(
     generation["first_event"] = generation_first_event
     generation["run_number"] = generation_run_number
     generation["seed"] = generation_seed
+    generation["generator_backend"] = generator_backend
+    if generator_backend == STANDALONE_GENERATOR_BACKEND:
+        assert matrix_element_seed is not None
+        assert shower_seed is not None
+        generation["matrix_element_seed"] = matrix_element_seed
+        generation["shower_seed"] = shower_seed
     lhe_contract["signed_filter_efficiency"] = signed_phase_space_efficiency
     lhe_contract["absolute_filter_efficiency"] = absolute_phase_space_efficiency
-    alignment["job_option_sha256"] = job_option_sha
+    if generator_backend == ATHGENERATION_BACKEND:
+        assert job_option_sha is not None
+        alignment["job_option_sha256"] = job_option_sha
+    else:
+        assert generation_config_sha is not None
+        assert shower_log_sha is not None
+        alignment["generation_config_sha256"] = generation_config_sha
+        alignment["shower_log_sha256"] = shower_log_sha
 
     embedded_files = {
         name: {"path": str(paths[name]), "sha256": actual_hashes[name]}
@@ -1960,10 +2566,19 @@ def build_analysis_tree(
                         "alternative-weight tree is not one-to-one with Events"
                     )
 
-                athgen_release = _release_triplet(
-                    provenance.generation["athgeneration_release"],
-                    "AthGeneration release",
-                )
+                if (
+                    provenance.generation["generator_backend"]
+                    == ATHGENERATION_BACKEND
+                ):
+                    athgen_release = _release_triplet(
+                        provenance.generation["athgeneration_release"],
+                        "AthGeneration release",
+                    )
+                else:
+                    # The legacy Runs schema keeps these three columns.  A zero
+                    # triplet is the documented not-applicable representation
+                    # for the standalone MadGraph/Pythia backend.
+                    athgen_release = (0, 0, 0)
                 signed_efficiency_value = provenance.lhe_contract[
                     "signed_filter_efficiency"
                 ]

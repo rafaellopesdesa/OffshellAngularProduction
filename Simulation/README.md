@@ -1,7 +1,7 @@
 # Delphes dressed and reconstructed event simulation
 
-This directory converts Pythia-showered HepMC events from the ATLAS generation
-step into a Delphes ROOT tree. It preserves one output entry for every input
+This directory converts Pythia-showered HepMC events from either supported
+generation backend into a Delphes ROOT tree. It preserves one output entry for every input
 HepMC event and stores both dressed-particle and reconstructed-lepton views.
 No fiducial or off-shell analysis selection is applied here.
 
@@ -9,11 +9,13 @@ The generation samples are direct `e-e+mu-mu+` final states:
 
 - `gg4l`: the full gluon-initiated process, including Higgs, continuum, and
   their interference;
-- `qqZZ`: the quark-initiated four-lepton process.
+- `qqZZ`: the quark-initiated four-lepton process;
+- `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`: standalone
+  MadGraph/Pythia polarization components in the same exclusive final state.
 
-Both samples are already generated in the desired decay channel. Therefore
-the simulation applies an identity event-weight scale of exactly `1.0` to both
-processes. In particular, no Higgs branching fraction is applied to `gg4l`.
+All samples are already generated in the desired decay channel. Therefore the
+simulation applies an identity event-weight scale of exactly `1.0` to every
+process. In particular, no Higgs branching fraction is applied to `gg4l`.
 `Event.CrossSection` and `Event.CrossSectionError` are preserved unchanged as
 signed, running Pythia diagnostics. The authoritative filtered normalization
 comes from the pre-shower `IDWTUP=-4` LHE sample mean recorded by the generation
@@ -68,12 +70,29 @@ extra flags must not be embedded in `CXX`.
 ## Dressed leptons
 
 The resolved card starts from stable post-shower electrons, muons, and photons.
-A dressed lepton must:
+Every dressed lepton must:
 
 - be an electron or muon with HepMC status 1;
-- descend from a W, Z, or virtual photon with mass above 5 GeV;
 - have no hadron-decay ancestor;
 - not come through an intermediate tau decay.
+
+The remaining origin requirement is selected from the resolved process, and
+the two policies are deliberately mutually exclusive:
+
+- `gg4l` and `qqZZ` retain the original rule: the lepton must descend from a
+  W, Z, or virtual photon above 5 GeV. Polarized Z identifiers 230 and 231 are
+  also recognized (and exempted from the generic numeric hadron-ID test).
+- `vpolar_*` requires a direct hard-process lepton. Starting from the stable
+  candidate, Delphes follows only exact signed-PDG copies and requires a
+  status-1 or status-23 lepton attached directly to two PDG-21, status-21
+  incoming gluons. The boson-origin rule is disabled in this mode, so a
+  shower `gamma* -> l+l-` conversion cannot enter the hard four-lepton set.
+
+These status values follow the pinned Pythia/HepMC2 interface: an unradiated
+outgoing hard lepton is serialized as final status 1; after radiation, its
+consumed hard copy is serialized as status 23. Delphes stores the HepMC status
+verbatim and resolves the production vertex's two incoming particles into
+`Candidate::M1` and `Candidate::M2`.
 
 Eligible stable photons must have no hadron-decay ancestor. Each is assigned
 at most once, to the nearest eligible lepton within `deltaR < 0.1`; there is no
@@ -84,7 +103,11 @@ leptons appear nonprompt.
 
 The complete shower record remains in `Particle`, bare stable particles are in
 `StableParticle`, and the dressed objects are in `DressedElectron` and
-`DressedMuon`.
+`DressedMuon`. For `vpolar_*`, output validation additionally requires every
+event to contain exactly one dressed particle of each signed flavour
+`e-`, `e+`, `mu-`, and `mu+`. Simulation metadata schema 3 records the selected
+origin policy, whether direct-hard candidates were required, and whether this
+exact multiplicity postcondition was validated.
 
 ## Reconstructed response
 
@@ -174,7 +197,7 @@ the extension is only a fallback.
 
 For every input, the runner:
 
-- infers `gg4l` or `qqZZ` from adjacent `run-metadata.txt`, unless explicitly
+- infers any supported process from adjacent `run-metadata.txt`, unless explicitly
   supplied with `--process`;
 - obtains a deterministic Delphes seed from generation metadata, the directory
   name, or a deterministic fallback;

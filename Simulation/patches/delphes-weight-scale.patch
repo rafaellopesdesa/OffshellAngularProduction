@@ -217,3 +217,5 @@ index cd86ca5..2ef0e07 100644
 +    reader->SetWeightScale(weightScale);
  
      modularDelphes->InitTask();
+
+     i = 3;

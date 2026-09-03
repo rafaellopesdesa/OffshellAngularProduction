@@ -2,18 +2,19 @@ diff --git a/modules/LeptonDressing.cc b/modules/LeptonDressing.cc
 index 0186035..6c10bcd 100644
 --- a/modules/LeptonDressing.cc
 +++ b/modules/LeptonDressing.cc
-@@ -71,6 +71,10 @@ void LeptonDressing::Init()
+@@ -71,6 +71,11 @@ void LeptonDressing::Init()
    fDeltaR = GetDouble("DeltaRMax", 0.4);
    fDressingPTMin = GetDouble("DressingPTMin", 0.1);
    fRequireNoHadronAncestor = GetBool("RequireNoHadronAncestor", false);
 +  fRequireNoHadronAncestorCandidate = GetBool("RequireNoHadronAncestorCandidate", false);
 +  fRequireBosonAncestorCandidate = GetBool("RequireBosonAncestorCandidate", false);
++  fRequireDirectHardProcessCandidate = GetBool("RequireDirectHardProcessCandidate", false);
 +  fAllowTauDecayCandidate = GetBool("AllowTauDecayCandidate", false);
 +  fVirtualPhotonMinMass = GetDouble("VirtualPhotonMinMass", 5.0);
    fUniqueAssignment = GetBool("UniqueAssignment", false);
 
    // import input array(s)
-@@ -111,6 +115,7 @@ void LeptonDressing::Process()
+@@ -111,6 +116,7 @@ void LeptonDressing::Process()
      fItCandidateInputArray->Reset();
      while((candidate = static_cast<Candidate *>(fItCandidateInputArray->Next())))
      {
@@ -21,7 +22,7 @@ index 0186035..6c10bcd 100644
        mother = candidate;
        candidate = static_cast<Candidate *>(candidate->Clone());
        candidate->AddCandidate(mother);
-@@ -156,6 +161,7 @@ void LeptonDressing::Process()
+@@ -156,6 +162,7 @@ void LeptonDressing::Process()
    fItCandidateInputArray->Reset();
    while((candidate = static_cast<Candidate *>(fItCandidateInputArray->Next())))
    {
@@ -29,7 +30,13 @@ index 0186035..6c10bcd 100644
      const TLorentzVector &candidateMomentum = candidate->Momentum;
 
      // loop over all input tracks
-@@ -237,3 +243,45 @@ Bool_t LeptonDressing::HasHadronAncestor(const Candidate *candidate) const
+@@ -190,4 +197,5 @@ Bool_t LeptonDressing::IsHadron(Int_t pid) const
+ {
+   const Int_t absolutePID = TMath::Abs(pid);
++  if(absolutePID == 230 || absolutePID == 231) return false;
+   return (absolutePID >= 100 && absolutePID < 1000000) || absolutePID >= 1000000000;
+ }
+@@ -237,3 +245,104 @@ Bool_t LeptonDressing::HasHadronAncestor(const Candidate *candidate) const
  }
 
  //------------------------------------------------------------------------------
@@ -51,7 +58,11 @@ index 0186035..6c10bcd 100644
 +    const Candidate *ancestor = static_cast<const Candidate *>(fParticleInputArray->At(index));
 +    if(!ancestor) continue;
 +    const Int_t absolutePID = TMath::Abs(ancestor->PID);
-+    if(absolutePID == 23 || absolutePID == 24) return true;
++    // VPolarization represents longitudinal and transverse Z bosons with
++    // PDG IDs 230 and 231. Keep the ordinary W/Z/gamma* behavior and also
++    // recognize these explicit polarized states if they survive showering.
++    if(absolutePID == 23 || absolutePID == 24 ||
++       absolutePID == 230 || absolutePID == 231) return true;
 +    if(absolutePID == 22 && ancestor->Momentum.M() > fVirtualPhotonMinMass) return true;
 +
 +    // Follow status copies of the same lepton and, when explicitly enabled,
@@ -67,10 +78,65 @@ index 0186035..6c10bcd 100644
 +
 +//------------------------------------------------------------------------------
 +
++Bool_t LeptonDressing::HasDirectHardProcessAncestor(const Candidate *candidate) const
++{
++  vector<const Candidate *> pending;
++  set<const Candidate *> visited;
++  const Int_t leptonPID = candidate->PID;
++  pending.push_back(candidate);
++
++  while(!pending.empty())
++  {
++    const Candidate *lepton = pending.back();
++    pending.pop_back();
++    if(!lepton || !visited.insert(lepton).second) continue;
++    if(lepton->PID != leptonPID) continue;
++
++    vector<Int_t> mothers;
++    AddMothers(lepton, mothers);
++    if((lepton->Status == 1 || lepton->Status == 23) &&
++       mothers.size() == 2 && mothers[0] != mothers[1])
++    {
++      Bool_t directFromHardGluons = true;
++      for(vector<Int_t>::const_iterator it = mothers.begin();
++          it != mothers.end(); ++it)
++      {
++        const Candidate *mother = static_cast<const Candidate *>(
++          fParticleInputArray->At(*it));
++        if(!mother || mother->PID != 21 || mother->Status != 21)
++        {
++          directFromHardGluons = false;
++          break;
++        }
++      }
++      if(directFromHardGluons) return true;
++    }
++
++    // Pythia retains same-PDG copies when a hard outgoing lepton radiates.
++    // Follow only those copies. Never traverse a tau or photon: their
++    // decay/conversion leptons cannot use this VPolar-specific fallback.
++    for(vector<Int_t>::const_iterator it = mothers.begin();
++        it != mothers.end(); ++it)
++    {
++      const Candidate *mother = static_cast<const Candidate *>(
++        fParticleInputArray->At(*it));
++      if(mother && mother->PID == leptonPID)
++      {
++        pending.push_back(mother);
++      }
++    }
++  }
++  return false;
++}
++
++//------------------------------------------------------------------------------
++
 +Bool_t LeptonDressing::IsCandidateEligible(const Candidate *candidate) const
 +{
 +  if(fRequireNoHadronAncestorCandidate && HasHadronAncestor(candidate)) return false;
 +  if(fRequireBosonAncestorCandidate && !HasBosonAncestor(candidate)) return false;
++  if(fRequireDirectHardProcessCandidate &&
++     !HasDirectHardProcessAncestor(candidate)) return false;
 +  return true;
 +}
 +
@@ -79,12 +145,13 @@ diff --git a/modules/LeptonDressing.h b/modules/LeptonDressing.h
 index b694637..b721c7e 100644
 --- a/modules/LeptonDressing.h
 +++ b/modules/LeptonDressing.h
-@@ -47,11 +47,17 @@ private:
+@@ -47,11 +47,19 @@ private:
    Double_t fDeltaR;
    Double_t fDressingPTMin;
    Bool_t fRequireNoHadronAncestor;
 +  Bool_t fRequireNoHadronAncestorCandidate;
 +  Bool_t fRequireBosonAncestorCandidate;
++  Bool_t fRequireDirectHardProcessCandidate;
 +  Bool_t fAllowTauDecayCandidate;
 +  Double_t fVirtualPhotonMinMass;
    Bool_t fUniqueAssignment;
@@ -93,16 +160,17 @@ index b694637..b721c7e 100644
    Bool_t IsParton(Int_t pid) const;
    Bool_t HasHadronAncestor(const Candidate *candidate) const;
 +  Bool_t HasBosonAncestor(const Candidate *candidate) const;
++  Bool_t HasDirectHardProcessAncestor(const Candidate *candidate) const;
 +  Bool_t IsCandidateEligible(const Candidate *candidate) const;
    void AddMothers(const Candidate *candidate, std::vector<Int_t> &indices) const;
 
    TIterator *fItDressingInputArray; //!
-@@ -66,7 +72,7 @@ private:
+@@ -66,7 +74,7 @@ private:
 
    TObjArray *fOutputArray; //!
 
 -  ClassDef(LeptonDressing, 2)
-+  ClassDef(LeptonDressing, 3)
++  ClassDef(LeptonDressing, 4)
  };
 
  #endif

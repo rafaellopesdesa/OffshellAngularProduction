@@ -93,6 +93,7 @@ def _analysis_metadata(
                 "first_event": event_number_start,
                 "run_number": run_number,
                 "ecm_energy_gev": 13600.0,
+                "generator_backend": "athgeneration",
                 "athgeneration_release": "23.6.41",
                 "generator_mll_min_gev": 50.0,
                 "generator_m4l_min_gev": 150.0 if sample == "gg4l" else 70.0,
@@ -153,13 +154,20 @@ def _analysis_metadata(
                 "contract_conditions": {"post_shower_generator_filter": False},
             },
             "simulation": {
-                "schema_version": 2,
+                "schema_version": 3,
                 "process": sample,
                 "random_seed": delphes_seed,
                 "weight_scale": 1.0,
                 "weight_scale_policy": "identity_for_direct_2e2mu_generation",
                 "weight_branches_preserved": "Event.Weight,Weight.Weight",
                 "cross_section_semantics": "conditional_on_lhe_phase_space_filter",
+                "dressed_lepton_origin": (
+                    "W_or_Z_or_gammaStar_mass_gt_5,non_hadronic,"
+                    "direct_e_mu_only"
+                ),
+                "dressed_lepton_origin_policy": "resonant_boson_origin_v1",
+                "dressed_lepton_direct_hard_process_candidates": False,
+                "dressed_lepton_exact_2e2mu_validated": False,
                 "delphes_version": "3.5.1",
                 "delphes_commit": "c" * 40,
                 "card_sha256": "d" * 64,

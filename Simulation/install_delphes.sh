@@ -237,15 +237,21 @@ patch_features_present() {
     delphes-prompt-lepton-origin.patch)
       grep -Fq 'fRequireBosonAncestorCandidate = GetBool(' \
         "$DELPHES_ROOT/modules/LeptonDressing.cc" &&
+        grep -Fq 'fRequireDirectHardProcessCandidate = GetBool(' \
+          "$DELPHES_ROOT/modules/LeptonDressing.cc" &&
         grep -Fq 'fAllowTauDecayCandidate = GetBool(' \
           "$DELPHES_ROOT/modules/LeptonDressing.cc" &&
         grep -Fq 'fVirtualPhotonMinMass = GetDouble(' \
           "$DELPHES_ROOT/modules/LeptonDressing.cc" &&
         grep -Fq 'Bool_t LeptonDressing::HasBosonAncestor(' \
           "$DELPHES_ROOT/modules/LeptonDressing.cc" &&
+        grep -Fq 'Bool_t LeptonDressing::HasDirectHardProcessAncestor(' \
+          "$DELPHES_ROOT/modules/LeptonDressing.cc" &&
+        grep -Fq 'absolutePID == 230 || absolutePID == 231' \
+          "$DELPHES_ROOT/modules/LeptonDressing.cc" &&
         grep -Fq 'Bool_t IsCandidateEligible(const Candidate *candidate) const;' \
           "$DELPHES_ROOT/modules/LeptonDressing.h" &&
-        grep -Fq 'ClassDef(LeptonDressing, 3)' \
+        grep -Fq 'ClassDef(LeptonDressing, 4)' \
           "$DELPHES_ROOT/modules/LeptonDressing.h"
       ;;
     *)

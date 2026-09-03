@@ -1,0 +1,20 @@
+# Values substituted by run_vpolar_generation.sh before this card is used.
+set run_card nevents @GENERATED_EVENTS@
+set run_card iseed @SEED@
+set run_card lpp1 1
+set run_card lpp2 1
+set run_card ebeam1 6800
+set run_card ebeam2 6800
+set run_card pdlabel lhapdf
+set run_card lhaid 324900
+set run_card dynamical_scale_choice 3
+set run_card me_frame [3,4,5,6]
+set run_card event_norm average
+set run_card use_syst False
+set run_card ickkw 0
+set run_card lhe_version 3.0
+set no_parton_cut
+set run_card mmll 50
+set run_card mmllmax 200
+set run_card mmnl 150
+set run_card mmnlmax 3000

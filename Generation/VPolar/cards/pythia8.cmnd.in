@@ -1,0 +1,15 @@
+! Standalone Pythia8 shower for the tagged MadGraph LHE stream.
+Main:numberOfEvents = @EVENTS@
+Main:timesAllowErrors = 10000
+Random:setSeed = on
+Random:seed = @SHOWER_SEED@
+Next:numberShowInfo = 0
+Next:numberShowProcess = 0
+Next:numberShowEvent = 0
+Beams:frameType = 4
+Beams:LHEF = @LHE_FILE@
+Tune:pp = 14
+PDF:pSet = 13
+HEPMCoutput:file = @HEPMC_FILE@
+HEPMCoutput:scaling = @HEPMC_SCALING@
+LHEFInputs:nSubruns = 1

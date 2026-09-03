@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Match every showered HepMC event to its exact POWHEG LHE hard event.
+"""Match every showered HepMC event to its exact source LHE hard event.
 
-The job options add two named LHE3 weights before Pythia runs.  Pythia8_i
-multiplies both by the same shower factor, so their ratio recovers a small,
+The generation backend adds two named LHE3 weights before Pythia runs.  The
+shower multiplies both by the same factor, so their ratio recovers a small,
 integral source-event ID even when events are skipped during showering.  This
 tool decodes those IDs from HepMC2, selects the corresponding tagged LHE
 events, and records a hash-bound alignment contract for downstream analysis.
@@ -29,6 +29,45 @@ from typing import Iterator, TextIO
 
 
 CONTRACT = "named-weight-id-v1"
+ATHGENERATION_BACKEND = "athgeneration"
+STANDALONE_BACKEND = "madgraph5-pythia8-vpolar-standalone"
+LEGACY_METADATA_SCHEMA = 2
+STANDALONE_METADATA_SCHEMA = 3
+GENERATION_CONFIG_SCHEMA = 1
+GENERATION_CONFIG_CONTRACT = "oap-vpolar-generation-config-v1"
+GENERATION_CONFIG_CARD_ROLES = ("process", "run", "param", "madloop", "pythia")
+VPOLAR_LOOP_REDUCTION = {
+    "backend": "CutTools",
+    "collier": None,
+    "loop_optimized_output": True,
+    "madloop_reduction_lib": "1",
+    "ninja": None,
+    "output_dependencies": "external",
+}
+VPOLAR_COMPONENTS = {
+    "vpolar_LL": "LL",
+    "vpolar_TT": "TT",
+    "vpolar_TL": "TL",
+    "vpolar_LT": "LT",
+}
+VPOLAR_GENERATE_LINES = {
+    "vpolar_LL": (
+        "generate g g > e+ e- mu+ mu- QED=4 QCD=2 [noborn = QCD] / a z za zt"
+    ),
+    "vpolar_TT": (
+        "generate g g > e+ e- mu+ mu- QED=4 QCD=2 [noborn = QCD] / a z z0 za"
+    ),
+    "vpolar_TL": (
+        "generate g g > e+ e- mu+ mu- QED=4 QCD=2 [noborn = QCD] "
+        "/ a z za --loop_filter=oap_tl"
+    ),
+    "vpolar_LT": (
+        "generate g g > e+ e- mu+ mu- QED=4 QCD=2 [noborn = QCD] "
+        "/ a z za --loop_filter=oap_lt"
+    ),
+}
+MAX_MADGRAPH_SEED = 904_866_561
+MAX_PYTHIA_SEED = 900_000_000
 NORMALIZATION_CONTRACT = "idwtup-minus4-sample-mean-v1"
 CROSS_SECTION_METHOD = (
     "mean nominal LHE weight; rejected events assigned zero for filtered estimate"
@@ -575,23 +614,289 @@ def validate_lhe_contract_metadata(
     return metadata
 
 
+def _config_int(metadata: dict, key: str) -> int:
+    value = metadata.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise AlignmentError(f"generation config field {key} must be an integer")
+    return value
+
+
+def _config_number(metadata: dict, key: str) -> float:
+    value = metadata.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AlignmentError(f"generation config field {key} must be numeric")
+    number = float(value)
+    if not math.isfinite(number):
+        raise AlignmentError(f"generation config field {key} must be finite")
+    return number
+
+
+def _run_card_assignments(path: Path) -> dict[str, str]:
+    assignments: dict[str, str] = {}
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        active = raw_line.split("!", 1)[0].strip()
+        if not active or active.startswith("#") or "=" not in active:
+            continue
+        value, key = active.split("=", 1)
+        key = key.strip().lower()
+        if key in assignments:
+            raise AlignmentError(
+                f"duplicate MadGraph run-card key {key} at line {line_number}"
+            )
+        assignments[key] = value.strip()
+    return assignments
+
+
+def _pythia_assignments(path: Path) -> dict[str, str]:
+    assignments: dict[str, str] = {}
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        active = raw_line.split("!", 1)[0].strip()
+        if not active or "=" not in active:
+            continue
+        key, value = active.split("=", 1)
+        key = key.strip().lower()
+        if key in assignments:
+            raise AlignmentError(
+                f"duplicate Pythia-card key {key} at line {line_number}"
+            )
+        assignments[key] = value.strip()
+    return assignments
+
+
+def _madloop_reduction_value(path: Path) -> str:
+    """Read the one explicitly selected MadLoop reduction-library value."""
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    markers = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip().lower() == "#mlreductionlib"
+    ]
+    if len(markers) != 1 or markers[0] + 1 >= len(lines):
+        raise AlignmentError(
+            "realized MadLoop card must contain one #MLReductionLib entry"
+        )
+    value = lines[markers[0] + 1].strip()
+    if value.startswith("!") or not value:
+        raise AlignmentError(
+            "realized MadLoop card does not explicitly select a reduction library"
+        )
+    return value
+
+
+def validate_generation_config(
+    path: Path,
+    *,
+    process: str,
+    run_number: int,
+    requested_events: int,
+    generated_lhe_events: int,
+    matrix_element_seed: int,
+    shower_seed: int,
+    expected_m4l_min: float,
+    expected_m4l_max: float,
+) -> dict:
+    """Validate the standalone manifest and every realized card it binds."""
+
+    try:
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise AlignmentError(f"cannot read standalone generation config: {path}") from error
+    if not isinstance(metadata, dict):
+        raise AlignmentError("standalone generation config must be a JSON object")
+
+    expected = {
+        "schema_version": GENERATION_CONFIG_SCHEMA,
+        "contract": GENERATION_CONFIG_CONTRACT,
+        "generator_backend": STANDALONE_BACKEND,
+        "process": process,
+        "polarization_component": VPOLAR_COMPONENTS[process],
+        "run_number": run_number,
+        "requested_events": requested_events,
+        "generated_lhe_events": generated_lhe_events,
+        "matrix_element_seed": matrix_element_seed,
+        "shower_seed": shower_seed,
+        "ecm_energy_gev": 13_600,
+        "mll_min_gev": 50,
+        "mll_max_gev": 200,
+    }
+    mismatches = [
+        f"{key}={metadata.get(key)!r} (expected {value!r})"
+        for key, value in expected.items()
+        if metadata.get(key) != value
+    ]
+    for key, expected_value in (
+        ("m4l_min_gev", expected_m4l_min),
+        ("m4l_max_gev", expected_m4l_max),
+    ):
+        value = metadata.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isclose(
+            float(value), expected_value, rel_tol=0.0, abs_tol=1.0e-12
+        ):
+            mismatches.append(f"{key}={value!r} (expected {expected_value!r})")
+    if mismatches:
+        raise AlignmentError(
+            "standalone generation config mismatch: " + "; ".join(mismatches)
+        )
+
+    # Also force useful type diagnostics for fields consumed downstream.
+    _config_int(metadata, "run_number")
+    _config_int(metadata, "requested_events")
+    _config_int(metadata, "generated_lhe_events")
+    _config_int(metadata, "matrix_element_seed")
+    _config_int(metadata, "shower_seed")
+    _config_number(metadata, "ecm_energy_gev")
+    _config_number(metadata, "mll_min_gev")
+    _config_number(metadata, "mll_max_gev")
+    _config_number(metadata, "m4l_min_gev")
+    _config_number(metadata, "m4l_max_gev")
+    if metadata.get("loop_reduction") != VPOLAR_LOOP_REDUCTION:
+        raise AlignmentError(
+            "standalone generation config does not use the required optimized "
+            "CutTools-only reduction"
+        )
+
+    cards = metadata.get("cards")
+    if not isinstance(cards, dict):
+        raise AlignmentError("standalone generation config cards must be an object")
+    config_directory = path.parent.resolve()
+    realized_cards: dict[str, Path] = {}
+    seen_paths: set[Path] = set()
+    for role in GENERATION_CONFIG_CARD_ROLES:
+        record = cards.get(role)
+        if not isinstance(record, dict):
+            raise AlignmentError(f"generation config card {role} must be an object")
+        declared_path = record.get("path")
+        if not isinstance(declared_path, str) or not declared_path:
+            raise AlignmentError(f"generation config card {role} has no path")
+        relative_path = Path(declared_path)
+        if relative_path.is_absolute() or relative_path.name != declared_path:
+            raise AlignmentError(
+                f"generation config card {role} path must be a plain file name"
+            )
+        if record.get("path_scope") != "generation_run_directory":
+            raise AlignmentError(
+                f"generation config card {role} has unsupported path_scope"
+            )
+        resolved = (config_directory / relative_path).resolve()
+        if resolved.parent != config_directory or not resolved.is_file():
+            raise AlignmentError(
+                f"generation config card {role} does not resolve beside the config"
+            )
+        if resolved in seen_paths:
+            raise AlignmentError("generation config card paths must be distinct")
+        seen_paths.add(resolved)
+        declared_sha = record.get("sha256")
+        if not isinstance(declared_sha, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", declared_sha
+        ):
+            raise AlignmentError(
+                f"generation config card {role} has an invalid SHA-256 digest"
+            )
+        observed_sha = sha256(resolved)
+        if observed_sha != declared_sha:
+            raise AlignmentError(
+                f"generation config card {role} SHA-256 mismatch"
+            )
+        realized_cards[role] = resolved
+
+    active_process_lines = [
+        line.strip()
+        for line in realized_cards["process"].read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    generate_lines = [
+        line for line in active_process_lines if line.startswith("generate ")
+    ]
+    if generate_lines != [VPOLAR_GENERATE_LINES[process]]:
+        raise AlignmentError(
+            "realized process card does not contain the exact exclusive full-eemumu "
+            f"definition for {process}"
+        )
+    if any(line.startswith("add process ") for line in active_process_lines):
+        raise AlignmentError(
+            "realized process card contains an unexpected additional process"
+        )
+    if any(re.search(r"(?:^|\s)/\s+[^#]*\bh\b", line) for line in active_process_lines):
+        raise AlignmentError("realized process card excludes the Higgs amplitude")
+
+    run_assignments = _run_card_assignments(realized_cards["run"])
+    try:
+        realized_me_seed = int(run_assignments["iseed"])
+        realized_events = int(run_assignments["nevents"])
+    except (KeyError, ValueError) as error:
+        raise AlignmentError(
+            "realized MadGraph run card has invalid iseed or nevents"
+        ) from error
+    if realized_me_seed != matrix_element_seed or realized_events != generated_lhe_events:
+        raise AlignmentError(
+            "realized MadGraph run-card seed/event count disagrees with generation config"
+        )
+
+    pythia_assignments = _pythia_assignments(realized_cards["pythia"])
+    if pythia_assignments.get("random:setseed", "").lower() != "on":
+        raise AlignmentError("realized Pythia card does not enable its explicit seed")
+    try:
+        realized_shower_seed = int(pythia_assignments["random:seed"])
+    except (KeyError, ValueError) as error:
+        raise AlignmentError("realized Pythia card has an invalid random seed") from error
+    if realized_shower_seed != shower_seed:
+        raise AlignmentError(
+            "realized Pythia seed disagrees with standalone generation config"
+        )
+    reduction_value = _madloop_reduction_value(realized_cards["madloop"])
+    if reduction_value != VPOLAR_LOOP_REDUCTION["madloop_reduction_lib"]:
+        raise AlignmentError(
+            "realized MadLoop card does not select CutTools reduction library 1"
+        )
+    return metadata
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lhe-archive", required=True, type=Path)
     parser.add_argument("--lhe-contract-metadata", required=True, type=Path)
     parser.add_argument("--hepmc", required=True, type=Path)
-    parser.add_argument("--job-option", required=True, type=Path)
-    parser.add_argument("--transform-log", required=True, type=Path)
+    parser.add_argument("--job-option", type=Path)
+    parser.add_argument("--transform-log", type=Path)
+    parser.add_argument(
+        "--generator-backend",
+        choices=(ATHGENERATION_BACKEND, STANDALONE_BACKEND),
+        default=ATHGENERATION_BACKEND,
+        help=(
+            "generation provenance backend (default: legacy AthGeneration; "
+            "standalone mode requires --generation-config and --shower-log)"
+        ),
+    )
+    parser.add_argument("--generation-config", type=Path)
+    parser.add_argument("--shower-log", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--metadata", required=True, type=Path)
     parser.add_argument("--expected-events", required=True, type=int)
     parser.add_argument("--expected-m4l-min", required=True, type=float)
     parser.add_argument("--expected-m4l-max", required=True, type=float)
-    parser.add_argument("--process", required=True, choices=("gg4l", "qqZZ"))
+    parser.add_argument(
+        "--process",
+        required=True,
+        choices=(
+            "gg4l",
+            "qqZZ",
+            "vpolar_LL",
+            "vpolar_TT",
+            "vpolar_TL",
+            "vpolar_LT",
+        ),
+    )
     parser.add_argument("--run-number", required=True, type=int)
     parser.add_argument("--seed", required=True, type=int)
+    parser.add_argument("--matrix-element-seed", type=int)
+    parser.add_argument("--shower-seed", type=int)
     parser.add_argument("--first-event", required=True, type=int)
-    parser.add_argument("--release", required=True)
+    parser.add_argument("--release")
     parser.add_argument("--contract", required=True, choices=(CONTRACT,))
     return parser.parse_args()
 
@@ -600,18 +905,79 @@ def main() -> int:
     args = parse_args()
     if not 1 <= args.expected_events <= 100_000:
         raise AlignmentError("--expected-events must be between 1 and 100000")
-    for path in (
+    common_inputs = (
         args.lhe_archive,
         args.lhe_contract_metadata,
         args.hepmc,
-        args.job_option,
-        args.transform_log,
-    ):
+    )
+    if args.generator_backend == ATHGENERATION_BACKEND:
+        if (
+            args.job_option is None
+            or args.transform_log is None
+            or args.release is None
+        ):
+            raise AlignmentError(
+                "AthGeneration mode requires --job-option, --transform-log, "
+                "and --release"
+            )
+        if args.generation_config is not None or args.shower_log is not None:
+            raise AlignmentError(
+                "--generation-config and --shower-log require the standalone backend"
+            )
+        if args.matrix_element_seed is not None or args.shower_seed is not None:
+            raise AlignmentError(
+                "--matrix-element-seed and --shower-seed require the standalone backend"
+            )
+        backend_inputs = (args.job_option, args.transform_log)
+    else:
+        if args.process not in {"vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"}:
+            raise AlignmentError(
+                "the standalone VPolar backend requires a vpolar_* process"
+            )
+        if args.generation_config is None or args.shower_log is None:
+            raise AlignmentError(
+                "standalone mode requires --generation-config and --shower-log"
+            )
+        if args.matrix_element_seed is None or args.shower_seed is None:
+            raise AlignmentError(
+                "standalone mode requires --matrix-element-seed and --shower-seed"
+            )
+        if not 1 <= args.matrix_element_seed <= MAX_MADGRAPH_SEED:
+            raise AlignmentError(
+                f"--matrix-element-seed must be between 1 and {MAX_MADGRAPH_SEED}"
+            )
+        if not 1 <= args.shower_seed <= MAX_PYTHIA_SEED:
+            raise AlignmentError(
+                f"--shower-seed must be between 1 and {MAX_PYTHIA_SEED}"
+            )
+        if args.seed != args.matrix_element_seed or args.seed != args.shower_seed:
+            raise AlignmentError(
+                "the current standalone contract requires --seed, "
+                "--matrix-element-seed, and --shower-seed to agree"
+            )
+        if (
+            args.job_option is not None
+            or args.transform_log is not None
+            or args.release is not None
+        ):
+            raise AlignmentError(
+                "standalone mode does not accept --job-option, --transform-log, "
+                "or --release"
+            )
+        backend_inputs = (args.generation_config, args.shower_log)
+
+    for path in common_inputs + backend_inputs:
         if not path.is_file():
             raise AlignmentError(f"required input does not exist: {path}")
 
-    assert_no_post_shower_filter(args.job_option)
-    observations = log_observations(args.transform_log)
+    if args.generator_backend == ATHGENERATION_BACKEND:
+        assert args.job_option is not None
+        assert args.transform_log is not None
+        assert_no_post_shower_filter(args.job_option)
+        observations = log_observations(args.transform_log)
+    else:
+        assert args.shower_log is not None
+        observations = log_observations(args.shower_log)
     contract_metadata = validate_lhe_contract_metadata(
         args.lhe_contract_metadata,
         process=args.process,
@@ -619,6 +985,24 @@ def main() -> int:
         expected_m4l_min=args.expected_m4l_min,
         expected_m4l_max=args.expected_m4l_max,
     )
+    generation_config = None
+    if args.generator_backend == STANDALONE_BACKEND:
+        assert args.generation_config is not None
+        assert args.matrix_element_seed is not None
+        assert args.shower_seed is not None
+        generation_config = validate_generation_config(
+            args.generation_config,
+            process=args.process,
+            run_number=args.run_number,
+            requested_events=args.expected_events,
+            generated_lhe_events=_required_int(
+                contract_metadata, "generated_lhe_events"
+            ),
+            matrix_element_seed=args.matrix_element_seed,
+            shower_seed=args.shower_seed,
+            expected_m4l_min=args.expected_m4l_min,
+            expected_m4l_max=args.expected_m4l_max,
+        )
     event_numbers, source_ids, weight_names, id_index, unit_index = (
         read_hepmc_source_ids(args.hepmc)
     )
@@ -627,7 +1011,6 @@ def main() -> int:
             f"HepMC has {len(source_ids)} events; expected {args.expected_events}"
         )
 
-    member_name = ""
     with open_lhe_member(args.lhe_archive) as (member_name, source):
         preamble, selected, phase_space_lhe_events = select_lhe_events(
             source, set(source_ids)
@@ -691,14 +1074,17 @@ def main() -> int:
         "filtered_cross_section_mc_error_pb",
     )
     metadata = {
-        "schema_version": 2,
+        "schema_version": (
+            LEGACY_METADATA_SCHEMA
+            if args.generator_backend == ATHGENERATION_BACKEND
+            else STANDALONE_METADATA_SCHEMA
+        ),
         "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "contract": CONTRACT,
         "process": args.process,
         "run_number": args.run_number,
         "random_seed": args.seed,
         "first_event": args.first_event,
-        "athgeneration_release": args.release,
         "marker": {
             "id_weight_name": MARKER_ID_WEIGHT,
             "id_weight_index": id_index,
@@ -729,7 +1115,6 @@ def main() -> int:
             "mapping": "HepMC source-ID ratio selects the identically tagged LHE event",
             "hepmc_source_ids_strictly_increasing": True,
         },
-        "transform_log_observations": observations,
         "files": {
             "lhe_archive": {
                 "path": args.lhe_archive.name,
@@ -752,18 +1137,53 @@ def main() -> int:
                 "path_scope": "generation_run_directory",
                 "sha256": sha256(args.output),
             },
-            "job_option": {
-                "path": f"jobOptions/{args.run_number}/{args.job_option.name}",
-                "path_scope": "Generation_directory",
-                "sha256": sha256(args.job_option),
-            },
-            "transform_log": {
-                "path": args.transform_log.name,
-                "path_scope": "generation_run_directory",
-                "sha256": sha256(args.transform_log),
-            },
         },
     }
+    if args.generator_backend == ATHGENERATION_BACKEND:
+        assert args.job_option is not None
+        assert args.transform_log is not None
+        metadata["athgeneration_release"] = args.release
+        metadata["transform_log_observations"] = observations
+        metadata["files"].update(
+            {
+                "job_option": {
+                    "path": f"jobOptions/{args.run_number}/{args.job_option.name}",
+                    "path_scope": "Generation_directory",
+                    "sha256": sha256(args.job_option),
+                },
+                "transform_log": {
+                    "path": args.transform_log.name,
+                    "path_scope": "generation_run_directory",
+                    "sha256": sha256(args.transform_log),
+                },
+            }
+        )
+    else:
+        assert args.generation_config is not None
+        assert args.shower_log is not None
+        assert args.matrix_element_seed is not None
+        assert args.shower_seed is not None
+        assert generation_config is not None
+        metadata["generator_backend"] = STANDALONE_BACKEND
+        metadata["matrix_element_seed"] = args.matrix_element_seed
+        metadata["shower_seed"] = args.shower_seed
+        metadata["generation_config"] = generation_config
+        metadata["contract_conditions"]["generation_config_validated"] = True
+        metadata["shower_log_observations"] = observations
+        metadata["files"].update(
+            {
+                "generation_config": {
+                    "path": args.generation_config.name,
+                    "path_scope": "generation_run_directory",
+                    "sha256": sha256(args.generation_config),
+                },
+                "shower_log": {
+                    "path": args.shower_log.name,
+                    "path_scope": "generation_run_directory",
+                    "sha256": sha256(args.shower_log),
+                },
+            }
+        )
     args.metadata.write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

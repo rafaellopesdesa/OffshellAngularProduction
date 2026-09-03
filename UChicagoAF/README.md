@@ -1,10 +1,9 @@
 # UChicago Analysis Facility runtime
 
-This directory contains the host-side runtime entry point for the UChicago
-ATLAS Analysis Facility (AF). It intentionally covers environment setup only.
-HTCondor submission, resource requests, retries, and output transfer will be
-added after the local Generation -> Simulation -> Analysis chain has been
-validated.
+This directory contains the runtime and HTCondor entry points for the UChicago
+ATLAS Analysis Facility (AF). `run_in_atlas_container.sh` handles ATLAS
+container setup; `condor/` prepares and runs deterministic campaigns for both
+the ATLAS and standalone VPolar generation backends.
 
 ## Site conventions
 

@@ -13,7 +13,7 @@ Usage:
   Workflow/run_chain.sh PROCESS --events N --seed N --job-id N [options]
 
 PROCESS:
-  gg4l or qqZZ
+  gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT
 
 Required options:
   --events N             Number of retained events
@@ -22,13 +22,15 @@ Required options:
 
 Options:
   --campaign-id N        Unsigned campaign identifier (default: 0)
-  --first-event N        First ATLAS event number (default: 1)
+  --first-event N        First output event number (default: 1)
   --output-dir DIR       Stage working/output directory
   --analysis-output FILE Compact final ROOT file (default: DIR/analysis.root)
   --release VERSION      AthGeneration release (default: generation default)
   --gridpack FILE        Compatible POWHEG integration grids
   --gridpack-metadata FILE
                          Manifest for --gridpack (default: FILE.metadata.json)
+  --generator-prefix DIR VPolar MadGraph/Pythia installation prefix
+  --generation-cores N   VPolar MadGraph worker count (default: 1)
   --no-generation-setup  Use an already configured AthGeneration environment
   --delphes-card FILE    Override the bundled Delphes ATLAS card
   --delphes-seed N       Override the Delphes random seed
@@ -53,10 +55,10 @@ fi
 PROCESS="$1"
 shift
 case "$PROCESS" in
-  gg4l|qqZZ) ;;
+  gg4l|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
   qqzz) PROCESS=qqZZ ;;
   *)
-    echo "PROCESS must be gg4l or qqZZ" >&2
+    echo "PROCESS must be gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
     exit 2
     ;;
 esac
@@ -71,6 +73,9 @@ ANALYSIS_OUTPUT=""
 RELEASE=""
 GRIDPACK=""
 GRIDPACK_METADATA=""
+GENERATOR_PREFIX=""
+GENERATION_CORES=1
+GENERATION_CORES_SET=0
 NO_GENERATION_SETUP=0
 DELPHES_CARD=""
 DELPHES_SEED=""
@@ -95,6 +100,8 @@ while (($#)); do
     --release) need_value "$@"; RELEASE="$2"; shift 2 ;;
     --gridpack) need_value "$@"; GRIDPACK="$2"; shift 2 ;;
     --gridpack-metadata) need_value "$@"; GRIDPACK_METADATA="$2"; shift 2 ;;
+    --generator-prefix) need_value "$@"; GENERATOR_PREFIX="$2"; shift 2 ;;
+    --generation-cores) need_value "$@"; GENERATION_CORES="$2"; GENERATION_CORES_SET=1; shift 2 ;;
     --no-generation-setup) NO_GENERATION_SETUP=1; shift ;;
     --delphes-card) need_value "$@"; DELPHES_CARD="$2"; shift 2 ;;
     --delphes-seed) need_value "$@"; DELPHES_SEED="$2"; shift 2 ;;
@@ -103,6 +110,37 @@ while (($#)); do
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+case "$PROCESS" in
+  vpolar_*)
+    [[ -n "$GENERATOR_PREFIX" ]] || {
+      echo "--generator-prefix is required for vpolar_* processes" >&2
+      exit 2
+    }
+    if [[ -n "$RELEASE" || -n "$GRIDPACK" || -n "$GRIDPACK_METADATA" ||
+          "$NO_GENERATION_SETUP" -ne 0 ]]; then
+      echo "--release, --gridpack, --gridpack-metadata, and --no-generation-setup are ATLAS-only" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    [[ -z "$GENERATOR_PREFIX" ]] || {
+      echo "--generator-prefix is valid only for vpolar_* processes" >&2
+      exit 2
+    }
+    ((GENERATION_CORES_SET == 0)) || {
+      echo "--generation-cores is valid only for vpolar_* processes" >&2
+      exit 2
+    }
+    ;;
+esac
+
+[[ "$GENERATION_CORES" =~ ^[1-9][0-9]*$ ]] &&
+  ((${#GENERATION_CORES} <= 3)) &&
+  ((10#$GENERATION_CORES <= 256)) || {
+  echo "--generation-cores must be an integer from 1 through 256" >&2
+  exit 2
+}
 
 command -v "$ANALYSIS_PYTHON" >/dev/null || {
   echo "Analysis Python is unavailable: $ANALYSIS_PYTHON" >&2
@@ -113,7 +151,7 @@ command -v "$ANALYSIS_PYTHON" >/dev/null || {
 # numeric identifiers cannot support the requested chain.
 "$ANALYSIS_PYTHON" - \
   "$EVENTS" "$SEED" "$JOB_ID" "$CAMPAIGN_ID" "$FIRST_EVENT" \
-  "${DELPHES_SEED:-none}" <<'PY'
+  "${DELPHES_SEED:-none}" "$PROCESS" <<'PY'
 import re
 import sys
 
@@ -131,6 +169,7 @@ values = dict(
     campaign_id=sys.argv[4],
     first_event=sys.argv[5],
     delphes_seed=sys.argv[6],
+    process=sys.argv[7],
 )
 
 
@@ -145,10 +184,15 @@ def bounded(name, pattern, low, high):
 
 
 bounded("events", r"[1-9][0-9]*", 1, 100_000)
-bounded("seed", r"[1-9][0-9]*", 1, 999_999_999)
+# The common chain reuses this seed for Delphes, whose supported upper bound
+# is 900,000,000.  Enforce the intersection even when the generator alone
+# accepts a wider range.
+bounded("seed", r"[1-9][0-9]*", 1, 900_000_000)
 bounded("job_id", r"0|[1-9][0-9]*", 0, (1 << 32) - 1)
 bounded("campaign_id", r"0|[1-9][0-9]*", 0, (1 << 64) - 1)
 bounded("first_event", r"[1-9][0-9]*", 1, 999_999_999)
+if int(values["first_event"]) + int(values["events"]) - 1 > 999_999_999:
+    raise SystemExit("requested event-number range exceeds 999999999")
 if values["delphes_seed"] != "none":
     bounded("delphes_seed", r"[1-9][0-9]*", 1, 900_000_000)
 PY
@@ -238,7 +282,9 @@ esac
   echo "Missing $REPO_ROOT/Simulation/env.sh; run install_delphes.sh first." >&2
   exit 1
 }
-simulation_preflight=("$REPO_ROOT/Simulation/run_simulation.sh" --preflight)
+simulation_preflight=(
+  "$REPO_ROOT/Simulation/run_simulation.sh" --preflight --process "$PROCESS"
+)
 [[ -z "$DELPHES_CARD" ]] || simulation_preflight+=(--card "$DELPHES_CARD")
 "${simulation_preflight[@]}"
 
@@ -284,6 +330,10 @@ generation_command=(
 [[ -z "$RELEASE" ]] || generation_command+=(--release "$RELEASE")
 [[ -z "$GRIDPACK" ]] || generation_command+=(--gridpack "$GRIDPACK")
 [[ -z "$GRIDPACK_METADATA" ]] || generation_command+=(--gridpack-metadata "$GRIDPACK_METADATA")
+[[ -z "$GENERATOR_PREFIX" ]] || generation_command+=(--generator-prefix "$GENERATOR_PREFIX")
+case "$PROCESS" in
+  vpolar_*) generation_command+=(--cores "$GENERATION_CORES") ;;
+esac
 ((NO_GENERATION_SETUP == 0)) || generation_command+=(--no-setup)
 
 printf '[workflow] Generation\n'
@@ -327,6 +377,11 @@ fi
   --alignment-metadata "$GENERATION_DIR/alignment-metadata.json" \
   --simulation-metadata "$GENERATION_DIR/delphes_ATLAS/simulation-metadata.txt" \
   --output "$ANALYSIS_OUTPUT"
+
+[[ -s "$ANALYSIS_OUTPUT" ]] || {
+  echo "Analysis completed without a nonempty output: $ANALYSIS_OUTPUT" >&2
+  exit 1
+}
 
 touch "$OUTPUT_DIR/SUCCESS"
 STAGE_CLAIM_OWNED=0
