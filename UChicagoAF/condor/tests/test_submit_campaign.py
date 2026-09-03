@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -41,9 +43,61 @@ def invoke(*arguments: object) -> subprocess.CompletedProcess[str]:
     )
 
 
+def make_powheg_gridpack(tmp_path: Path, process: str = "gg4l") -> tuple[Path, Path]:
+    configs = {
+        "gg4l": (
+            100001,
+            "mc.PhPy8_NNPDF30_gg4l_full_2e2mu_m4l150_3000.py",
+        ),
+        "qqZZ": (100002, "mc.PhPy8EG_ZZ2e2mu_mll50.py"),
+    }
+    run_number, job_option_name = configs[process]
+    gridpack = tmp_path / f"{process}_integration_grids.tar.gz"
+    payload = b"deterministic test grid\n"
+    member = tarfile.TarInfo("pwggrid.dat")
+    member.size = len(payload)
+    with tarfile.open(gridpack, "w:gz") as archive:
+        archive.addfile(member, io.BytesIO(payload))
+    metadata = Path(f"{gridpack}.metadata.json")
+    creator = SCRIPT.parents[2] / "Generation" / "gridpack_metadata.py"
+    job_option = (
+        SCRIPT.parents[2]
+        / "Generation"
+        / "jobOptions"
+        / str(run_number)
+        / job_option_name
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(creator),
+            "create",
+            "--gridpack",
+            str(gridpack),
+            "--metadata",
+            str(metadata),
+            "--job-option",
+            str(job_option),
+            "--process",
+            process,
+            "--run-number",
+            str(run_number),
+            "--release",
+            "23.6.41",
+            "--ecm-energy-gev",
+            "13600",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return gridpack, metadata
+
+
 def test_prepares_deterministic_disjoint_jobs(tmp_path: Path) -> None:
     output_root = tmp_path / "output"
     campaign_dir = tmp_path / "submit"
+    gridpack, metadata = make_powheg_gridpack(tmp_path)
     result = invoke(
         "gg4l",
         "--jobs",
@@ -62,6 +116,8 @@ def test_prepares_deterministic_disjoint_jobs(tmp_path: Path) -> None:
         output_root,
         "--campaign-dir",
         campaign_dir,
+        "--gridpack",
+        gridpack,
     )
     assert result.returncode == 0, result.stderr
     assert "Not submitted" in result.stdout
@@ -94,6 +150,21 @@ def test_prepares_deterministic_disjoint_jobs(tmp_path: Path) -> None:
         assert queued_sha256 == hashlib.sha256(record_path.read_bytes()).hexdigest()
     assert all(len(record["repository_revision"]) == 40 for record in records)
     assert all(len(record["repository_snapshot_sha256"]) == 64 for record in records)
+    assert all(record["gridpack_metadata"] == str(metadata) for record in records)
+    expected_gridpack_sha256 = hashlib.sha256(gridpack.read_bytes()).hexdigest()
+    expected_metadata_sha256 = hashlib.sha256(metadata.read_bytes()).hexdigest()
+    assert all(record["schema_version"] == 2 for record in records)
+    assert all(
+        record["gridpack_sha256"] == expected_gridpack_sha256 for record in records
+    )
+    assert all(
+        record["gridpack_metadata_sha256"] == expected_metadata_sha256
+        for record in records
+    )
+    manifest = json.loads((campaign_dir / "campaign.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 2
+    assert manifest["gridpack_sha256"] == expected_gridpack_sha256
+    assert manifest["gridpack_metadata_sha256"] == expected_metadata_sha256
 
 
 def test_vpolar_prefix_is_required_and_forwarded(
@@ -153,6 +224,262 @@ def test_vpolar_prefix_is_required_and_forwarded(
     assert record["process"] == "vpolar_LT"
     assert record["generator_prefix"] == str(prefix.resolve())
     assert record["generation_cores"] == 3
+    assert record["gridpack"] is None
+    assert record["gridpack_metadata"] is None
+    assert record["gridpack_sha256"] is None
+    assert record["gridpack_metadata_sha256"] is None
+
+
+def test_vpolar_gridpack_is_validated_and_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefix = tmp_path / "vpolar"
+    prefix.mkdir()
+    (prefix / "SUCCESS").touch()
+    (prefix / "installation-manifest.json").write_text("{}\n", encoding="utf-8")
+    gridpack = tmp_path / "vpolar_LT_gridpack.tar.gz"
+    metadata = tmp_path / "vpolar_LT_gridpack.metadata.json"
+    gridpack.write_bytes(b"test gridpack")
+    metadata.write_text("{}\n", encoding="utf-8")
+    campaign_dir = tmp_path / "campaign"
+    module = load_module()
+    monkeypatch.setattr(
+        module, "validate_vpolar_installation", lambda *_arguments: None
+    )
+    validated: list[tuple[Path, Path, Path, Path, str]] = []
+    monkeypatch.setattr(
+        module,
+        "validate_vpolar_gridpack",
+        lambda repo, pack, manifest, installation, process: validated.append(
+            (repo, pack, manifest, installation, process)
+        ),
+    )
+
+    status = module.main(
+        [
+            "vpolar_LT",
+            "--jobs",
+            "2",
+            "--events-per-job",
+            "2",
+            "--campaign-id",
+            "8",
+            "--output-root",
+            str(tmp_path / "output"),
+            "--campaign-dir",
+            str(campaign_dir),
+            "--generator-prefix",
+            str(prefix),
+            "--gridpack",
+            str(gridpack),
+            "--gridpack-metadata",
+            str(metadata),
+            "--request-cpus",
+            "1",
+        ]
+    )
+
+    assert status == 0
+    assert validated == [
+        (
+            SCRIPT.parents[2],
+            gridpack.resolve(),
+            metadata.resolve(),
+            prefix.resolve(),
+            "vpolar_LT",
+        )
+    ]
+    records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((campaign_dir / "jobs").glob("*.json"))
+    ]
+    assert len(records) == 2
+    assert all(record["gridpack"] == str(gridpack.resolve()) for record in records)
+    assert all(
+        record["gridpack_metadata"] == str(metadata.resolve()) for record in records
+    )
+    assert all(
+        record["gridpack_sha256"] == hashlib.sha256(gridpack.read_bytes()).hexdigest()
+        for record in records
+    )
+    assert all(
+        record["gridpack_metadata_sha256"]
+        == hashlib.sha256(metadata.read_bytes()).hexdigest()
+        for record in records
+    )
+    assert all(record["generation_cores"] == 1 for record in records)
+
+
+def test_vpolar_gridpack_rejects_parallel_cpu_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    prefix = tmp_path / "vpolar"
+    prefix.mkdir()
+    (prefix / "SUCCESS").touch()
+    (prefix / "installation-manifest.json").write_text("{}\n", encoding="utf-8")
+    gridpack = tmp_path / "vpolar_LL_gridpack.tar.gz"
+    metadata = tmp_path / "vpolar_LL_gridpack.metadata.json"
+    gridpack.write_bytes(b"test gridpack")
+    metadata.write_text("{}\n", encoding="utf-8")
+    module = load_module()
+    monkeypatch.setattr(
+        module, "validate_vpolar_installation", lambda *_arguments: None
+    )
+
+    with pytest.raises(SystemExit) as raised:
+        module.main(
+            [
+                "vpolar_LL",
+                "--jobs",
+                "2",
+                "--events-per-job",
+                "1",
+                "--campaign-id",
+                "9",
+                "--output-root",
+                str(tmp_path / "output"),
+                "--campaign-dir",
+                str(tmp_path / "campaign"),
+                "--generator-prefix",
+                str(prefix),
+                "--gridpack",
+                str(gridpack),
+                "--gridpack-metadata",
+                str(metadata),
+                "--request-cpus",
+                "4",
+            ]
+        )
+
+    assert raised.value.code == 2
+    assert "VPolar gridpack" in capsys.readouterr().err
+    assert not (tmp_path / "campaign").exists()
+
+
+def test_incompatible_vpolar_gridpack_fails_before_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    prefix = tmp_path / "vpolar"
+    prefix.mkdir()
+    (prefix / "SUCCESS").touch()
+    (prefix / "installation-manifest.json").write_text("{}\n", encoding="utf-8")
+    gridpack = tmp_path / "vpolar_TT_gridpack.tar.gz"
+    metadata = tmp_path / "vpolar_TT_gridpack.metadata.json"
+    gridpack.write_bytes(b"test gridpack")
+    metadata.write_text("{}\n", encoding="utf-8")
+    campaign_dir = tmp_path / "campaign"
+    module = load_module()
+    monkeypatch.setattr(
+        module, "validate_vpolar_installation", lambda *_arguments: None
+    )
+
+    def reject_gridpack(*_arguments: object) -> None:
+        raise ValueError("--gridpack failed VPolar compatibility validation: mismatch")
+
+    monkeypatch.setattr(module, "validate_vpolar_gridpack", reject_gridpack)
+    with pytest.raises(SystemExit) as raised:
+        module.main(
+            [
+                "vpolar_TT",
+                "--jobs",
+                "2",
+                "--events-per-job",
+                "1",
+                "--campaign-id",
+                "10",
+                "--output-root",
+                str(tmp_path / "output"),
+                "--campaign-dir",
+                str(campaign_dir),
+                "--generator-prefix",
+                str(prefix),
+                "--gridpack",
+                str(gridpack),
+                "--gridpack-metadata",
+                str(metadata),
+            ]
+        )
+
+    assert raised.value.code == 2
+    assert "failed VPolar compatibility validation" in capsys.readouterr().err
+    assert not campaign_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "process",
+    ("gg4l", "qqZZ", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"),
+)
+def test_multi_job_campaign_requires_gridpack_before_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    process: str,
+) -> None:
+    module = load_module()
+    arguments = [
+        process,
+        "--jobs",
+        "2",
+        "--events-per-job",
+        "1",
+        "--campaign-id",
+        "2",
+        "--output-root",
+        str(tmp_path / "output"),
+        "--campaign-dir",
+        str(tmp_path / "campaign"),
+    ]
+    if process.startswith("vpolar_"):
+        prefix = tmp_path / "vpolar"
+        prefix.mkdir()
+        (prefix / "SUCCESS").touch()
+        (prefix / "installation-manifest.json").write_text("{}\n", encoding="utf-8")
+        monkeypatch.setattr(
+            module, "validate_vpolar_installation", lambda *_arguments: None
+        )
+        arguments.extend(("--generator-prefix", str(prefix)))
+
+    with pytest.raises(SystemExit) as raised:
+        module.main(arguments)
+
+    assert raised.value.code == 2
+    assert (
+        "--gridpack is required when --jobs is greater than 1"
+        in capsys.readouterr().err
+    )
+    assert not (tmp_path / "campaign").exists()
+
+
+def test_incompatible_powheg_gridpack_fails_before_materialization(
+    tmp_path: Path,
+) -> None:
+    gridpack, metadata = make_powheg_gridpack(tmp_path)
+    manifest = json.loads(metadata.read_text(encoding="utf-8"))
+    manifest["process"] = "qqZZ"
+    metadata.write_text(json.dumps(manifest), encoding="utf-8")
+    campaign_dir = tmp_path / "campaign"
+
+    result = invoke(
+        "gg4l",
+        "--jobs",
+        2,
+        "--events-per-job",
+        1,
+        "--campaign-id",
+        3,
+        "--output-root",
+        tmp_path / "output",
+        "--campaign-dir",
+        campaign_dir,
+        "--gridpack",
+        gridpack,
+        "--gridpack-metadata",
+        metadata,
+    )
+
+    assert result.returncode == 2
+    assert "failed POWHEG compatibility validation" in result.stderr
+    assert not campaign_dir.exists()
 
 
 def test_rejects_vpolar_prefix_with_invalid_manifest(tmp_path: Path) -> None:
@@ -278,6 +605,7 @@ def test_missing_shared_path_is_reported_without_traceback(tmp_path: Path) -> No
 
 def test_dry_run_has_no_filesystem_side_effect(tmp_path: Path) -> None:
     campaign_dir = tmp_path / "campaign"
+    gridpack, metadata = make_powheg_gridpack(tmp_path, "qqZZ")
     result = invoke(
         "qqZZ",
         "--jobs",
@@ -290,6 +618,10 @@ def test_dry_run_has_no_filesystem_side_effect(tmp_path: Path) -> None:
         tmp_path / "output",
         "--campaign-dir",
         campaign_dir,
+        "--gridpack",
+        gridpack,
+        "--gridpack-metadata",
+        metadata,
         "--dry-run",
     )
     assert result.returncode == 0, result.stderr
@@ -438,7 +770,7 @@ def fake_job_record(tmp_path: Path, workflow_body: str) -> tuple[Path, Path, Pat
     publish_dir = tmp_path / "results" / "gg4l" / "campaign_88" / "job_000004"
     failure_parent = publish_dir.parent / "failures"
     record = {
-        "schema_version": 1,
+        "schema_version": 2,
         "repository": str(repository),
         "repository_revision": snapshot["revision"],
         "repository_snapshot_contract": snapshot["contract"],
@@ -458,6 +790,8 @@ def fake_job_record(tmp_path: Path, workflow_body: str) -> tuple[Path, Path, Pat
         "release": None,
         "gridpack": None,
         "gridpack_metadata": None,
+        "gridpack_sha256": None,
+        "gridpack_metadata_sha256": None,
         "no_generation_setup": False,
         "delphes_card": None,
     }
@@ -625,6 +959,164 @@ touch "${output_dir}/SUCCESS"
     assert publication["job_record_sha256"] == hashlib.sha256(
         original_record
     ).hexdigest()
+
+
+def test_worker_forwards_vpolar_gridless_requested_cpus(tmp_path: Path) -> None:
+    arguments_file = tmp_path / "workflow-arguments.txt"
+    record_path, publish_dir, _ = fake_job_record(
+        tmp_path,
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" >"${OAP_TEST_WORKFLOW_ARGUMENTS}"
+output_dir=
+analysis_output=
+while (($#)); do
+  case $1 in
+    --output-dir) output_dir=$2; shift 2 ;;
+    --analysis-output) analysis_output=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+generation=${output_dir}/generation
+mkdir -p "${generation}/delphes_ATLAS"
+printf 'ROOT' >"${analysis_output}"
+printf 'process=vpolar_TL\n' >"${generation}/run-metadata.txt"
+printf '{}\n' >"${generation}/lhe-contract-metadata.json"
+printf '{}\n' >"${generation}/alignment-metadata.json"
+printf 'process=vpolar_TL\n' >"${generation}/delphes_ATLAS/simulation-metadata.txt"
+touch "${output_dir}/SUCCESS"
+""",
+    )
+    prefix = tmp_path / "vpolar"
+    prefix.mkdir()
+    (prefix / "SUCCESS").touch()
+    (prefix / "installation-manifest.json").write_text("{}\n", encoding="utf-8")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record.update(
+        process="vpolar_TL",
+        generator_prefix=str(prefix),
+        generation_cores=7,
+    )
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    result = subprocess.run(
+        worker_command(record_path),
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "_CONDOR_SCRATCH_DIR": str(scratch),
+            "OAP_TEST_WORKFLOW_ARGUMENTS": str(arguments_file),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (publish_dir / "SUCCESS").is_file()
+    forwarded = arguments_file.read_text(encoding="utf-8").splitlines()
+    assert forwarded[0] == "vpolar_TL"
+    cores_index = forwarded.index("--generation-cores")
+    assert forwarded[cores_index + 1] == "7"
+    assert "--gridpack" not in forwarded
+
+
+def test_worker_rejects_parallel_vpolar_gridpack_record(tmp_path: Path) -> None:
+    record_path, publish_dir, _ = fake_job_record(
+        tmp_path, "#!/usr/bin/env bash\nexit 99\n"
+    )
+    prefix = tmp_path / "vpolar"
+    prefix.mkdir()
+    (prefix / "SUCCESS").touch()
+    (prefix / "installation-manifest.json").write_text("{}\n", encoding="utf-8")
+    gridpack = tmp_path / "vpolar_LL_gridpack.tar.gz"
+    metadata = tmp_path / "vpolar_LL_gridpack.metadata.json"
+    gridpack.write_bytes(b"test gridpack")
+    metadata.write_text("{}\n", encoding="utf-8")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record.update(
+        process="vpolar_LL",
+        generator_prefix=str(prefix),
+        generation_cores=2,
+        gridpack=str(gridpack),
+        gridpack_metadata=str(metadata),
+        gridpack_sha256=hashlib.sha256(gridpack.read_bytes()).hexdigest(),
+        gridpack_metadata_sha256=hashlib.sha256(metadata.read_bytes()).hexdigest(),
+    )
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    result = subprocess.run(
+        worker_command(record_path),
+        text=True,
+        capture_output=True,
+        env={**os.environ, "_CONDOR_SCRATCH_DIR": str(scratch)},
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "VPolar gridpack consumption requires generation_cores=1" in result.stderr
+    assert not publish_dir.exists()
+    assert list(scratch.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("tampered_name", "diagnostic"),
+    (
+        ("gridpack", "gridpack changed after campaign preparation"),
+        ("metadata", "gridpack metadata changed after campaign preparation"),
+    ),
+)
+def test_worker_rejects_replaced_gridpack_inputs_before_workflow(
+    tmp_path: Path, tampered_name: str, diagnostic: str
+) -> None:
+    workflow_marker = tmp_path / "workflow-started"
+    record_path, publish_dir, failure_parent = fake_job_record(
+        tmp_path,
+        """#!/usr/bin/env bash
+touch "${OAP_TEST_WORKFLOW_MARKER}"
+exit 99
+""",
+    )
+    gridpack = tmp_path / "integration_grids.tar.gz"
+    metadata = tmp_path / "integration_grids.tar.gz.metadata.json"
+    gridpack.write_bytes(b"original gridpack bytes")
+    metadata.write_bytes(b"original metadata bytes")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record.update(
+        gridpack=str(gridpack),
+        gridpack_metadata=str(metadata),
+        gridpack_sha256=hashlib.sha256(gridpack.read_bytes()).hexdigest(),
+        gridpack_metadata_sha256=hashlib.sha256(metadata.read_bytes()).hexdigest(),
+    )
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    target = gridpack if tampered_name == "gridpack" else metadata
+    replacement = tmp_path / f"replacement-{tampered_name}"
+    replacement.write_bytes(b"replacement bytes")
+    os.replace(replacement, target)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    result = subprocess.run(
+        worker_command(record_path),
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "_CONDOR_SCRATCH_DIR": str(scratch),
+            "OAP_TEST_WORKFLOW_MARKER": str(workflow_marker),
+        },
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert diagnostic in result.stderr
+    assert not workflow_marker.exists()
+    assert not publish_dir.exists()
+    assert not failure_parent.exists()
+    assert list(scratch.iterdir()) == []
 
 
 def test_worker_publishes_failure_diagnostics(tmp_path: Path) -> None:

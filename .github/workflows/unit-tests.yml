@@ -25,4 +25,6 @@ jobs:
       - name: Python tests
         run: uv run --frozen --extra test python -m pytest -q
       - name: Shell syntax
-        run: bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh
+        run: >-
+          bash -n Generation/*.sh Generation/VPolar/*.sh Simulation/*.sh
+          UChicagoAF/*.sh UChicagoAF/condor/*.sh Workflow/*.sh

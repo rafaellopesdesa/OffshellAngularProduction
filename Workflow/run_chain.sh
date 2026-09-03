@@ -25,13 +25,13 @@ Options:
   --first-event N        First output event number (default: 1)
   --output-dir DIR       Stage working/output directory
   --analysis-output FILE Compact final ROOT file (default: DIR/analysis.root)
-  --release VERSION      AthGeneration release (default: generation default)
-  --gridpack FILE        Compatible POWHEG integration grids
+  --release VERSION      POWHEG AthGeneration release (default: generator default)
+  --gridpack FILE        Compatible integration gridpack for this process
   --gridpack-metadata FILE
                          Manifest for --gridpack (default: FILE.metadata.json)
   --generator-prefix DIR VPolar MadGraph/Pythia installation prefix
-  --generation-cores N   VPolar MadGraph worker count (default: 1)
-  --no-generation-setup  Use an already configured AthGeneration environment
+  --generation-cores N   VPolar gridless MadGraph worker count (default: 1)
+  --no-generation-setup  Use an already configured POWHEG/Athena environment
   --delphes-card FILE    Override the bundled Delphes ATLAS card
   --delphes-seed N       Override the Delphes random seed
   --analysis-python EXE  Python containing the project dependencies
@@ -117,9 +117,8 @@ case "$PROCESS" in
       echo "--generator-prefix is required for vpolar_* processes" >&2
       exit 2
     }
-    if [[ -n "$RELEASE" || -n "$GRIDPACK" || -n "$GRIDPACK_METADATA" ||
-          "$NO_GENERATION_SETUP" -ne 0 ]]; then
-      echo "--release, --gridpack, --gridpack-metadata, and --no-generation-setup are ATLAS-only" >&2
+    if [[ -n "$RELEASE" || "$NO_GENERATION_SETUP" -ne 0 ]]; then
+      echo "--release and --no-generation-setup are POWHEG/Athena-only" >&2
       exit 2
     fi
     ;;

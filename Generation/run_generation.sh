@@ -27,12 +27,12 @@ Options:
   --first-event N      First output event number (default: 1)
   --output-dir DIR     Run directory (default: Generation/runs/PROCESS_seedSEED)
   --release VERSION    AthGeneration version (default: 23.6.41)
-  --gridpack FILE      Reuse a compatible integration_grids.tar.gz
+  --gridpack FILE      Reuse a compatible gridpack for the selected process
   --gridpack-metadata FILE
                        Manifest for --gridpack (default: FILE.metadata.json)
   --generator-prefix DIR
                        VPolar MadGraph/Pythia installation prefix
-  --cores N            VPolar MadGraph local cores (default: 1)
+  --cores N            VPolar gridless MadGraph cores (default: 1; packs use 1)
   --no-setup           Use an already configured AthGeneration environment
   --dry-run            Print the resolved transform command without running it
   -h, --help           Show this help

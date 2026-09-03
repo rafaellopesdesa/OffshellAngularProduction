@@ -28,12 +28,23 @@ def _fake_complete_process_bundle(prefix: Path, process: str = "vpolar_LL") -> P
     cuttools.mkdir(parents=True, exist_ok=True)
     (cuttools / "libcts.a").write_bytes(b"compiled bundled CutTools")
     (cuttools / "mpmodule.mod").write_bytes(b"compiled CutTools module")
+    iregi = prefix / "madgraph5" / "vendor" / "IREGI" / "src" / "libiregi.a"
+    iregi.parent.mkdir(parents=True, exist_ok=True)
+    iregi.write_bytes(b"compiled bundled IREGI")
 
     root = prefix / "processes" / process
     generator = root / "bin" / "generate_events"
     generator.parent.mkdir(parents=True, exist_ok=True)
     generator.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     generator.chmod(0o755)
+    for name in (
+        "madevent_interface.py",
+        "common_run_interface.py",
+        "gen_ximprove.py",
+    ):
+        runtime = root / "bin" / "internal" / name
+        runtime.parent.mkdir(parents=True, exist_ok=True)
+        runtime.write_text(f"# pinned runtime {name}\n", encoding="utf-8")
     model_source = root / "Source" / "MODEL" / "model_functions.f"
     model_source.parent.mkdir(parents=True, exist_ok=True)
     model_source.write_text("subroutine model_functions\nend\n", encoding="utf-8")
@@ -44,6 +55,7 @@ def _fake_complete_process_bundle(prefix: Path, process: str = "vpolar_LL") -> P
     process_lib.mkdir(parents=True, exist_ok=True)
     (process_lib / "libcts.a").symlink_to(cuttools / "libcts.a")
     (process_lib / "mpmodule.mod").symlink_to(cuttools / "mpmodule.mod")
+    (process_lib / "libiregi.a").symlink_to(iregi)
 
     subprocesses = root / "SubProcesses"
     subprocesses.mkdir(parents=True, exist_ok=True)
@@ -209,6 +221,7 @@ def test_run_card_matches_offshell_powheg_phase_space_and_average_weights():
         "set run_card mmllmax 200",
         "set run_card mmnl 150",
         "set run_card mmnlmax 3000",
+        "set run_card python_seed -2",
     }
     assert required.issubset(set(text.splitlines()))
 
@@ -271,7 +284,8 @@ def test_runner_pins_and_records_realized_cuttools_reduction():
 
 def test_madgraph_and_pythia_implicit_outputs_are_isolated_from_caller():
     runner = (VPOLAR / "run_vpolar_generation.sh").read_text(encoding="utf-8")
-    assert '(\n  cd "$WORK_DIR"\n  run_logged "$MG5" "$MG5_CARD"\n)' in runner
+    assert 'cd "$WORK_DIR"\n    run_logged "$MG5" "$MG5_CARD"' in runner
+    assert 'cd "$GRIDPACK_WORK"\n    run_logged ./run.sh' in runner
     assert (
         '(\n  cd "$WORK_DIR"\n  run_logged "$PYTHIA_INTERFACE" "$PYTHIA_CARD"\n)'
         in runner
@@ -459,8 +473,22 @@ def test_installed_payload_fingerprint_includes_pythia_xml(tmp_path):
     _fake_complete_process_bundle(prefix)
     for relative in (
         "madgraph5/bin/mg5_aMC",
+        "madgraph5/madgraph/interface/madevent_interface.py",
+        "madgraph5/madgraph/interface/common_run_interface.py",
+        "madgraph5/madgraph/madevent/gen_ximprove.py",
         "madgraph5/madgraph/loop/loop_diagram_generation.py",
         "madgraph5/madgraph/loop/oap_vpolar_filter.py",
+        "madgraph5/vendor/IREGI/src/libiregi.a",
+        "madgraph5/Template/LO/bin/internal/make_gridpack",
+        "madgraph5/Template/LO/bin/internal/store4grid",
+        "madgraph5/Template/LO/bin/internal/restore_data",
+        "madgraph5/Template/LO/bin/internal/Gridpack/run.sh",
+        "madgraph5/Template/LO/bin/internal/Gridpack/gridrun",
+        "madgraph5/Template/LO/bin/internal/Gridpack/TheChopper-pl",
+        "madgraph5/Template/LO/bin/internal/Gridpack/clean4grid",
+        "madgraph5/Template/LO/bin/internal/Gridpack/compile",
+        "madgraph5/Template/LO/bin/internal/Gridpack/refine4grid",
+        "madgraph5/Template/LO/bin/internal/Gridpack/replace.pl",
         "heptools/pythia8/bin/pythia8-config",
         "heptools/MG5aMC_PY8_interface/MG5aMC_PY8_interface",
     ):
@@ -479,6 +507,16 @@ def test_installed_payload_fingerprint_includes_pythia_xml(tmp_path):
     xml.write_text("tune version one\n", encoding="utf-8")
 
     initial = module._installed_fingerprints(prefix, ("vpolar_LL",))
+    for relative in (
+        "madgraph5/madgraph/interface/madevent_interface.py",
+        "madgraph5/madgraph/interface/common_run_interface.py",
+        "madgraph5/madgraph/madevent/gen_ximprove.py",
+        "madgraph5/Template/LO/bin/internal/make_gridpack",
+        "madgraph5/Template/LO/bin/internal/Gridpack/run.sh",
+        "madgraph5/Template/LO/bin/internal/Gridpack/gridrun",
+        "madgraph5/Template/LO/bin/internal/Gridpack/clean4grid",
+    ):
+        assert relative in initial["files"]
     xml.write_text("tune version two\n", encoding="utf-8")
     changed = module._installed_fingerprints(prefix, ("vpolar_LL",))
 
@@ -537,10 +575,15 @@ def test_lhapdf_fingerprint_binds_library_metadata_and_central_member(tmp_path):
     libdir.mkdir(parents=True)
     library = libdir / "libLHAPDF.so"
     library.write_bytes(b"library version one")
+    static_library = libdir / "libLHAPDF.a"
+    static_library.write_bytes(b"static library version one")
     set_dir = tmp_path / "data" / module.PDF_SET
     set_dir.mkdir(parents=True)
     info = set_dir / f"{module.PDF_SET}.info"
-    info.write_text(f"SetIndex: {module.PDF_ID}\nNumMembers: 101\n", encoding="utf-8")
+    info.write_text(
+        f"SetIndex: {module.PDF_ID}\nAlphaS_MZ: 0.118\nNumMembers: 101\n",
+        encoding="utf-8",
+    )
     member = set_dir / f"{module.PDF_SET}_0000.dat"
     member.write_text("central member version one\n", encoding="utf-8")
 
@@ -565,6 +608,8 @@ def test_lhapdf_fingerprint_binds_library_metadata_and_central_member(tmp_path):
 
     assert initial["config_sha256"] == hashlib.sha256(config.read_bytes()).hexdigest()
     assert initial["library"]["path"] == str(library)
+    assert initial["static_library"]["path"] == str(static_library)
+    assert initial["alpha_s_mz"] == 0.118
     assert initial["pdf_id"] == 324900
     assert initial["pdf_files"]["member_zero"]["path"] == str(member)
     assert (

@@ -40,6 +40,9 @@ Options:
   --generator-prefix DIR Shared installation made by install_vpolar.sh
                          (default: OAP_VPOLAR_PREFIX)
   --cores N              MadGraph local cores (default: 1)
+  --gridpack FILE        Compatible native PROCESS gridpack
+  --gridpack-metadata FILE
+                         Manifest (default: FILE.metadata.json)
   --dry-run              Validate and print the resolved job without running
   -h, --help             Show this help
 EOF
@@ -73,6 +76,8 @@ FIRST_EVENT=1
 OUTPUT_DIR=""
 GENERATOR_PREFIX="${OAP_VPOLAR_PREFIX:-}"
 CORES=1
+GRIDPACK=""
+GRIDPACK_METADATA=""
 DRY_RUN=0
 
 need_value() {
@@ -100,9 +105,11 @@ while (($#)); do
     --output-dir) need_value "$@"; OUTPUT_DIR="$(realpath -m -- "$2")"; shift 2 ;;
     --generator-prefix) need_value "$@"; GENERATOR_PREFIX="$2"; shift 2 ;;
     --cores) need_value "$@"; CORES="$2"; shift 2 ;;
+    --gridpack) need_value "$@"; GRIDPACK="$2"; shift 2 ;;
+    --gridpack-metadata) need_value "$@"; GRIDPACK_METADATA="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    --release|--gridpack|--gridpack-metadata)
+    --release)
       echo "$1 applies only to the ATLAS POWHEG backend" >&2
       exit 2
       ;;
@@ -134,6 +141,14 @@ bounded_positive_decimal "$CORES" 256 || {
   echo "--cores must be an integer from 1 through 256" >&2
   exit 2
 }
+if [[ -n "$GRIDPACK" && "$CORES" != 1 ]]; then
+  echo "native VPolar gridpack consumption is serial; use --cores 1" >&2
+  exit 2
+fi
+if [[ -n "$GRIDPACK_METADATA" && -z "$GRIDPACK" ]]; then
+  echo "--gridpack-metadata requires --gridpack" >&2
+  exit 2
+fi
 [[ -n "$GENERATOR_PREFIX" ]] || {
   echo "--generator-prefix is required (or set OAP_VPOLAR_PREFIX)" >&2
   exit 2
@@ -154,6 +169,45 @@ GENERATOR_PREFIX="$(realpath -e -- "$unresolved_prefix")" || {
 
 python3 "$SCRIPT_DIR/installation_manifest.py" validate \
   --prefix "$GENERATOR_PREFIX" --process "$PROCESS" >/dev/null
+
+GRIDPACK_INPUT=""
+GRIDPACK_INPUT_SHA256=""
+GRIDPACK_METADATA_INPUT=""
+GRIDPACK_METADATA_INPUT_SHA256=""
+if [[ -n "$GRIDPACK" ]]; then
+  unresolved_gridpack="$GRIDPACK"
+  GRIDPACK="$(realpath -e -- "$unresolved_gridpack")" || {
+    echo "--gridpack must resolve to an existing path: $unresolved_gridpack" >&2
+    exit 1
+  }
+  [[ -f "$GRIDPACK" && -r "$GRIDPACK" ]] || {
+    echo "--gridpack is not a readable regular file: $GRIDPACK" >&2
+    exit 1
+  }
+  [[ -n "$GRIDPACK_METADATA" ]] || GRIDPACK_METADATA="${GRIDPACK}.metadata.json"
+  unresolved_gridpack_metadata="$GRIDPACK_METADATA"
+  GRIDPACK_METADATA="$(realpath -e -- "$unresolved_gridpack_metadata")" || {
+    echo "--gridpack-metadata must resolve to an existing path: $unresolved_gridpack_metadata" >&2
+    exit 1
+  }
+  [[ -f "$GRIDPACK_METADATA" && -r "$GRIDPACK_METADATA" ]] || {
+    echo "--gridpack-metadata is not a readable regular file: $GRIDPACK_METADATA" >&2
+    exit 1
+  }
+  if [[ "$GRIDPACK" == *$'\n'* || "$GRIDPACK_METADATA" == *$'\n'* ]]; then
+    echo "gridpack paths may not contain a newline" >&2
+    exit 2
+  fi
+  python3 "$SCRIPT_DIR/gridpack_metadata.py" validate \
+    --gridpack "$GRIDPACK" \
+    --metadata "$GRIDPACK_METADATA" \
+    --generator-prefix "$GENERATOR_PREFIX" \
+    --process "$PROCESS" >/dev/null
+  GRIDPACK_INPUT="$GRIDPACK"
+  GRIDPACK_INPUT_SHA256="$(sha256sum -- "$GRIDPACK" | awk '{print $1}')"
+  GRIDPACK_METADATA_INPUT="$GRIDPACK_METADATA"
+  GRIDPACK_METADATA_INPUT_SHA256="$(sha256sum -- "$GRIDPACK_METADATA" | awk '{print $1}')"
+fi
 
 MG5_ROOT="$GENERATOR_PREFIX/madgraph5"
 TOOLS_ROOT="$GENERATOR_PREFIX/heptools"
@@ -220,9 +274,10 @@ fi
 GENERATED_EVENTS=$(((11 * EVENTS + 9) / 10))
 
 if ((DRY_RUN)); then
-  printf 'backend=%s process=%s component=%s events=%d generated_lhe_events=%d seed=%d first_event=%d cores=%d prefix=%q output=%q\n' \
+  printf 'backend=%s process=%s component=%s events=%d generated_lhe_events=%d seed=%d first_event=%d cores=%d prefix=%q output=%q gridpack=%q gridpack_metadata=%q\n' \
     "$BACKEND" "$PROCESS" "$COMPONENT" "$EVENTS" "$GENERATED_EVENTS" \
-    "$SEED" "$FIRST_EVENT" "$CORES" "$GENERATOR_PREFIX" "$OUTPUT_DIR"
+    "$SEED" "$FIRST_EVENT" "$CORES" "$GENERATOR_PREFIX" "$OUTPUT_DIR" \
+    "$GRIDPACK" "$GRIDPACK_METADATA"
   exit 0
 fi
 
@@ -248,9 +303,22 @@ cleanup() {
 }
 trap cleanup EXIT
 WORK_DIR="$(mktemp -d "$OUTPUT_DIR/.work.XXXXXX")"
-PROCESS_WORK="$WORK_DIR/process"
 cp -- "$MANIFEST" "$WORK_DIR/installation-manifest.json"
-cp -a --reflink=auto "$PROCESS_TEMPLATE" "$PROCESS_WORK"
+if [[ -n "$GRIDPACK" ]]; then
+  GRIDPACK_WORK="$WORK_DIR/gridpack"
+  python3 "$SCRIPT_DIR/gridpack_metadata.py" extract \
+    --gridpack "$GRIDPACK" \
+    --metadata "$GRIDPACK_METADATA" \
+    --generator-prefix "$GENERATOR_PREFIX" \
+    --process "$PROCESS" \
+    --output "$GRIDPACK_WORK" >/dev/null
+  PROCESS_WORK="$GRIDPACK_WORK/madevent"
+  cp -- "$GRIDPACK_METADATA" "$WORK_DIR/gridpack-metadata.json"
+else
+  GRIDPACK_WORK=""
+  PROCESS_WORK="$WORK_DIR/process"
+  cp -a --reflink=auto "$PROCESS_TEMPLATE" "$PROCESS_WORK"
+fi
 
 LOG="$WORK_DIR/transform.stdout.log"
 : >"$LOG"
@@ -261,10 +329,21 @@ run_logged() {
   "$@" 2>&1 | tee -a "$LOG"
 }
 
-RUN_NAME="oap_${COMPONENT}_${SEED}"
 MG5_CARD="$WORK_DIR/madgraph-generation.mg5"
-python3 - "$SCRIPT_DIR/cards/run_settings.mg5" "$MG5_CARD" \
-  "$PROCESS_WORK" "$RUN_NAME" "$GENERATED_EVENTS" "$SEED" "$CORES" <<'PY'
+if [[ -n "$GRIDPACK" ]]; then
+  RUN_NAME="GridRun_${SEED}"
+  cat >"$MG5_CARD" <<EOF
+# Native MadGraph5_aMC gridpack consumption (provenance record).
+# The executable path is run.sh; GridPackCmd reads the two mutable inputs below.
+gridpack_run_script=$GRIDPACK_WORK/run.sh
+generated_lhe_events=$GENERATED_EVENTS
+matrix_element_seed=$SEED
+gridpack_granularity=1
+EOF
+else
+  RUN_NAME="oap_${COMPONENT}_${SEED}"
+  python3 - "$SCRIPT_DIR/cards/run_settings.mg5" "$MG5_CARD" \
+    "$PROCESS_WORK" "$RUN_NAME" "$GENERATED_EVENTS" "$SEED" "$CORES" <<'PY'
 from pathlib import Path
 import shlex
 import sys
@@ -284,19 +363,62 @@ payload = (
 )
 Path(output).write_text(payload, encoding="utf-8")
 PY
+fi
 
 export PATH="$(dirname -- "$LHAPDF_CONFIG"):$TOOLS_ROOT/bin:$PATH"
 export LD_LIBRARY_PATH="$TOOLS_ROOT/pythia8/lib:$TOOLS_ROOT/hepmc/lib:$TOOLS_ROOT/hepmc/lib64:$TOOLS_ROOT/zlib/lib:$LHAPDF_LIBDIR:$LHAPDF_PREFIX/lib:$LHAPDF_PREFIX/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export LHAPDF_DATA_PATH="$(dirname -- "$LHAPDF_SET_DIR")${LHAPDF_DATA_PATH:+:$LHAPDF_DATA_PATH}"
 export PYTHIA8DATA
 
-# MG5 3.4.2 creates ``additional_command`` in its process cwd. Keep that and
-# any other implicit generator scratch files inside the private job area.
-(
-  cd "$WORK_DIR"
-  run_logged "$MG5" "$MG5_CARD"
-)
-MG5_LHE="$PROCESS_WORK/Events/$RUN_NAME/unweighted_events.lhe.gz"
+if [[ -n "$GRIDPACK" ]]; then
+  # The native MG5 GridPackCmd deliberately runs locally and serially. Its
+  # survey grids are frozen; only the event count and random seed are inputs.
+  (
+    cd "$GRIDPACK_WORK"
+    run_logged ./run.sh "$GENERATED_EVENTS" "$SEED"
+  )
+  MG5_LHE="$GRIDPACK_WORK/events.lhe.gz"
+  GRID_CARD="$PROCESS_WORK/Cards/grid_card.dat"
+  [[ -s "$GRID_CARD" ]] || {
+    echo "MadGraph gridpack did not retain its realized grid card: $GRID_CARD" >&2
+    exit 1
+  }
+  python3 - "$GRID_CARD" "$GENERATED_EVENTS" "$SEED" <<'PY'
+from pathlib import Path
+import sys
+
+path, events_raw, seed_raw = sys.argv[1:]
+values = {}
+for line_number, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+    active = raw.split("!", 1)[0].split("#", 1)[0].strip()
+    if not active or active.startswith("#") or "=" not in active:
+        continue
+    value, key = active.split("=", 1)
+    key = key.strip().lower()
+    if key in values:
+        raise SystemExit(f"duplicate grid-card key {key} at line {line_number}")
+    values[key] = value.strip()
+expected = {"gridrun": ".true.", "gevents": events_raw, "gseed": seed_raw, "ngran": "1"}
+for key, wanted in expected.items():
+    observed = values.get(key, "").lower()
+    if key == "gridrun":
+        if observed not in {"true", ".true.", "t"}:
+            raise SystemExit("realized grid card did not enable GridRun")
+    elif observed != wanted:
+        raise SystemExit(
+            f"realized grid-card value {key}={observed!r}; expected {wanted!r}"
+        )
+PY
+  cp -- "$GRID_CARD" "$WORK_DIR/madgraph-grid-card.dat"
+else
+  # MG5 3.4.2 creates ``additional_command`` in its process cwd. Keep that and
+  # any other implicit generator scratch files inside the private job area.
+  (
+    cd "$WORK_DIR"
+    run_logged "$MG5" "$MG5_CARD"
+  )
+  MG5_LHE="$PROCESS_WORK/Events/$RUN_NAME/unweighted_events.lhe.gz"
+fi
 [[ -s "$MG5_LHE" ]] || {
   echo "MadGraph did not produce $MG5_LHE" >&2
   exit 1
@@ -356,6 +478,12 @@ Path(output).write_text(text, encoding="utf-8")
 PY
 
 GENERATION_CONFIG="$WORK_DIR/generation-config.json"
+GRIDPACK_USED=0
+GRID_CARD_FOR_CONFIG=/dev/null
+[[ -z "$GRIDPACK" ]] || {
+  GRIDPACK_USED=1
+  GRID_CARD_FOR_CONFIG="$WORK_DIR/madgraph-grid-card.dat"
+}
 python3 - \
   "$WORK_DIR/madgraph-process-card.dat" \
   "$WORK_DIR/madgraph-run-card.dat" \
@@ -364,7 +492,9 @@ python3 - \
   "$PYTHIA_CARD" "$LHE_METADATA" "$GENERATION_CONFIG" \
   "$BACKEND" "$PROCESS" "$COMPONENT" "$RUN_NUMBER" "$EVENTS" \
   "$GENERATED_EVENTS" "$SEED" "$ECM_ENERGY_GEV" "$MZ_MIN_GEV" \
-  "$MZ_MAX_GEV" "$M4L_MIN_GEV" "$M4L_MAX_GEV" <<'PY'
+  "$MZ_MAX_GEV" "$M4L_MIN_GEV" "$M4L_MAX_GEV" \
+  "$GRIDPACK_USED" "$GRID_CARD_FOR_CONFIG" \
+  "$GRIDPACK_INPUT_SHA256" "$GRIDPACK_METADATA_INPUT_SHA256" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -393,7 +523,13 @@ import sys
     mll_max_raw,
     m4l_min_raw,
     m4l_max_raw,
+    gridpack_used_raw,
+    grid_card_raw,
+    gridpack_sha256,
+    gridpack_metadata_sha256,
 ) = sys.argv[1:]
+
+gridpack_used = bool(int(gridpack_used_raw))
 
 cards = {
     "process": Path(process_card_raw),
@@ -402,6 +538,8 @@ cards = {
     "madloop": Path(madloop_card_raw),
     "pythia": Path(pythia_card_raw),
 }
+if gridpack_used:
+    cards["grid"] = Path(grid_card_raw)
 lhe_metadata = json.loads(Path(lhe_metadata_raw).read_text(encoding="utf-8"))
 generated_events = int(generated_events_raw)
 if lhe_metadata.get("generated_lhe_events") != generated_events:
@@ -423,7 +561,7 @@ def run_assignments(path: Path) -> dict[str, str]:
     for line_number, raw_line in enumerate(
         path.read_text(encoding="utf-8").splitlines(), start=1
     ):
-        active = raw_line.split("!", 1)[0].strip()
+        active = raw_line.split("!", 1)[0].split("#", 1)[0].strip()
         if not active or active.startswith("#") or "=" not in active:
             continue
         value, key = active.split("=", 1)
@@ -439,7 +577,7 @@ def pythia_assignments(path: Path) -> dict[str, str]:
     for line_number, raw_line in enumerate(
         path.read_text(encoding="utf-8").splitlines(), start=1
     ):
-        active = raw_line.split("!", 1)[0].strip()
+        active = raw_line.split("!", 1)[0].split("#", 1)[0].strip()
         if not active or "=" not in active:
             continue
         key, value = active.split("=", 1)
@@ -481,8 +619,6 @@ def number(key: str) -> float:
 
 
 numeric_contract = {
-    "nevents": generated_events,
-    "iseed": int(seed_raw),
     "lpp1": 1,
     "lpp2": 1,
     "ebeam1": 6800,
@@ -495,7 +631,10 @@ numeric_contract = {
     "mmllmax": float(mll_max_raw),
     "mmnl": float(m4l_min_raw),
     "mmnlmax": float(m4l_max_raw),
+    "python_seed": -2,
 }
+if not gridpack_used:
+    numeric_contract.update({"nevents": generated_events, "iseed": int(seed_raw)})
 for key, expected in numeric_contract.items():
     observed = number(key)
     if not math.isclose(observed, expected, rel_tol=0.0, abs_tol=1.0e-12):
@@ -540,6 +679,11 @@ for key, raw_value in realized.items():
             f"realized run card retained unintended cut {key}={raw_value!r}"
         )
 
+if gridpack_used and token("gridpack") not in {"true", ".true.", "t"}:
+    raise SystemExit("frozen run card does not enable native gridpack mode")
+if not gridpack_used and token("gridpack") in {"true", ".true.", "t"}:
+    raise SystemExit("fresh-integration run unexpectedly enabled gridpack mode")
+
 pythia = pythia_assignments(cards["pythia"])
 if pythia.get("random:setseed", "").lower() != "on":
     raise SystemExit("realized Pythia card does not enable an explicit seed")
@@ -578,6 +722,14 @@ payload = {
     "run_card_validation": {
         "exact_contract_checked": True,
         "automatic_pt_eta_dr_cuts_disabled": True,
+        "build_time_nevents_and_seed_frozen": gridpack_used,
+    },
+    "matrix_element_generation": {
+        "mode": "native_mg5_gridpack" if gridpack_used else "fresh_integration",
+        "integration_reused": gridpack_used,
+        "gridpack_worker_serial": gridpack_used,
+        "gridpack_sha256": gridpack_sha256 or None,
+        "gridpack_metadata_sha256": gridpack_metadata_sha256 or None,
     },
     "cards": {
         role: {
@@ -645,6 +797,16 @@ LOOP_PATCH_SHA256="$(sha256sum -- "$SCRIPT_DIR/loop_filter_patch.py" | awk '{pri
 RUNNER_SHA256="$(sha256sum -- "$SCRIPT_PATH" | awk '{print $1}')"
 LHE_CONTRACT_SHA256="$(sha256sum -- "$GENERATION_DIR/python/offshell_lhe_contract.py" | awk '{print $1}')"
 ALIGNMENT_SHA256="$(sha256sum -- "$GENERATION_DIR/align_lhe_events.py" | awk '{print $1}')"
+GENERATION_MODE=fresh_integration
+INTEGRATION_REUSED=false
+GRIDPACK_WORKER_SERIAL=false
+GRID_CARD_SHA256=""
+if [[ -n "$GRIDPACK" ]]; then
+  GENERATION_MODE=native_mg5_gridpack
+  INTEGRATION_REUSED=true
+  GRIDPACK_WORKER_SERIAL=true
+  GRID_CARD_SHA256="$(sha256sum -- "$WORK_DIR/madgraph-grid-card.dat" | awk '{print $1}')"
+fi
 
 source_version() {
   python3 - "$SCRIPT_DIR/sources.json" "$1" "$2" <<'PY'
@@ -665,6 +827,14 @@ first_event=$FIRST_EVENT
 run_number=$RUN_NUMBER
 ecm_energy_gev=$ECM_ENERGY_GEV
 generator_backend=$BACKEND
+matrix_element_generation_mode=$GENERATION_MODE
+madgraph_integration_reused=$INTEGRATION_REUSED
+gridpack_worker_serial=$GRIDPACK_WORKER_SERIAL
+gridpack_input=$GRIDPACK_INPUT
+gridpack_input_sha256=$GRIDPACK_INPUT_SHA256
+gridpack_metadata_input=$GRIDPACK_METADATA_INPUT
+gridpack_metadata_input_sha256=$GRIDPACK_METADATA_INPUT_SHA256
+grid_card_sha256=$GRID_CARD_SHA256
 athgeneration_release_applicable=false
 generator_mll_min_gev=$MZ_MIN_GEV
 generator_mll_max_gev=$MZ_MAX_GEV
@@ -746,6 +916,12 @@ artifacts=(
   pythia8-card.cmnd
   generation-config.json
 )
+if [[ -n "$GRIDPACK" ]]; then
+  artifacts+=(
+    gridpack-metadata.json
+    madgraph-grid-card.dat
+  )
+fi
 for artifact in "${artifacts[@]}"; do
   [[ -s "$WORK_DIR/$artifact" ]] || {
     echo "Generation did not produce required artifact: $artifact" >&2

@@ -79,16 +79,75 @@ recorded PDF-data directory to `LHAPDF_DATA_PATH`. A compatible completed
 prefix is accepted idempotently. An incomplete or changed prefix is never overwritten
 automatically.
 
+Because the immutable manifest also binds the repository-side VPolar runtime
+and card inputs, a prefix made by an older checkout may be rejected after a
+workflow update. In that case, build a fresh prefix at a new path; do not edit
+or partially refresh the old installation.
+
 Loop export remains optimized, but Ninja and COLLIER are explicitly disabled
 and MadLoop is pinned to reduction-library ID 1 (CutTools). Generated processes
-link the CutTools library compiled from MadGraph's pinned bundled source. This
-avoids MadGraph's first-loop online installer and any ambient reduction library.
-The installer accepts a process only after that library and module exist and
+link the CutTools and IREGI libraries compiled from MadGraph's pinned bundled
+sources. This avoids MadGraph's first-loop online installer and any ambient
+reduction library.
+The installer accepts a process only after those libraries and module exist and
 the exported subprocess manifest contains optimized loop and MadEvent matrix
 sources; the early `generate_events` wrapper alone is not considered success.
 
 MadGraph is distributed under its NCSA-style license and Pythia under GPLv2;
 their notices remain in the downloaded installations.
+
+## Prepare native MadGraph gridpacks
+
+The shared installation is a compiled process cache, not an integration
+gridpack. Before a production campaign, prepare one independent native
+MadGraph gridpack for every polarization channel that will be generated:
+
+```bash
+Generation/prepare_gridpack.sh vpolar_LL \
+  --generator-prefix /data/$USER/offshell/software/vpolar \
+  --seed 21001 --cores 8 \
+  --output-dir /data/$USER/offshell/gridpacks/vpolar_LL
+```
+
+Repeat with distinct output directories for `vpolar_TT`, `vpolar_TL`, and
+`vpolar_LT`. A successful LL build publishes:
+
+```text
+/data/$USER/offshell/gridpacks/vpolar_LL/
+  vpolar_LL_gridpack.tar.gz
+  vpolar_LL_gridpack.tar.gz.metadata.json
+  madgraph-gridpack-build.mg5
+  external-link-materialization.json
+  installation-manifest.json
+  gridpack-build.log
+  SUCCESS
+```
+
+The builder copies the selected immutable process into private scratch, enables
+MadGraph's native `gridpack=True` mode, performs the survey/integration, and
+requires the resulting frozen `run.sh` plus `madevent/` payload. It then creates
+a manifest binding the archive to the polarization, installation manifest and
+process fingerprint, generator/UFO versions, process and physics cards, beam
+energy, PDF, cuts, scales, loop reduction, and native integration settings.
+Archive members and links are checked before either metadata creation or reuse.
+
+Only the requested LHE event count and random seed vary when the pack is run.
+The builder materializes the exported process's external CutTools and IREGI
+links before launch. MadGraph recreates an external static `libLHAPDF.a` link
+during launch, so the builder materializes that manifest-bound archive
+afterward and reruns the pinned native packager with `GridRun=true`. The
+published matrix-element archive therefore contains CutTools, IREGI, and the
+static LHAPDF library, but it still excludes Pythia, the dynamic LHAPDF
+runtime, and PDF data.
+
+`--generator-prefix` remains required and must resolve to the same validated
+immutable installation. The prefix, LHAPDF payload, or pack may not be changed
+after validation. Compatibility metadata is not a cryptographic signature;
+only run gridpacks produced by this builder in a trusted production area.
+
+Native MadGraph gridpack consumption is serial. `--cores` accelerates the
+one-time integration build, while a job that supplies `--gridpack` must use one
+core. Parallelism then comes from independent Condor jobs with distinct seeds.
 
 ## Common generation interface
 
@@ -98,14 +157,17 @@ The normal dispatcher selects this backend from the process name:
 Generation/run_generation.sh vpolar_LL \
   --events 50 --seed 21001 --first-event 1 \
   --generator-prefix /data/$USER/offshell/software/vpolar \
-  --output-dir /data/$USER/offshell/smoke/vpolar_LL_seed21001
+  --gridpack /data/$USER/offshell/gridpacks/vpolar_LL/vpolar_LL_gridpack.tar.gz \
+  --output-dir /data/$USER/offshell/production/vpolar_LL_seed21001
 ```
 
 The same command works for `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`.
 `OAP_VPOLAR_PREFIX` can supply the prefix. The runner validates the immutable
-manifest before claiming its output path, copies the selected process bundle
-to private job storage, and generates a 10% LHE safety margin for shower
-retries.
+installation and gridpack manifests before claiming its output path, extracts
+the pack into private job storage, and requests a 10% LHE safety margin for
+shower retries. Omitting `--gridpack` retains the original gridless path for a
+one-job smoke test or diagnosis; it copies the selected process bundle and
+repeats MadGraph integration.
 
 The run card uses `event_norm=average`, so MadGraph emits `IDWTUP=-4` and
 pb-valued sample-mean event weights. The common LHE helper adds
@@ -146,11 +208,14 @@ python UChicagoAF/condor/submit_campaign.py vpolar_TL \
   --jobs 20 --events-per-job 50 --seed-base 30001 \
   --campaign-id 20260902 \
   --generator-prefix /data/$USER/offshell/software/vpolar \
+  --gridpack /data/$USER/offshell/gridpacks/vpolar_TL/vpolar_TL_gridpack.tar.gz \
+  --request-cpus 1 \
   --output-root /data/$USER/offshell/production
 ```
 
 See `UChicagoAF/condor/README.md`. Installation is intentionally never run in
-an execute-node job.
+an execute-node job. Campaigns with more than one job require a compatible
+gridpack; the submitter validates both manifests before creating the campaign.
 
 ## Lightweight validation
 
@@ -162,4 +227,6 @@ bash -n Generation/VPolar/*.sh
 ```
 
 They cover exact process syntax, pinned inputs, the loop-filter route, diagram
-count contract, HepMC marker canonicalization, and installer dry-run behavior.
+count contract, HepMC marker canonicalization, installer dry-run behavior,
+native gridpack structure and safety, compatibility metadata, and generation
+preflight/forwarding.

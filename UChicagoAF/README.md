@@ -19,6 +19,15 @@ Use `/data/$USER` explicitly for normal generation and end-to-end output
 directories. Repository-local `Generation/runs/...` and `Workflow/runs/...`
 defaults are intended only for smoke tests and other small jobs.
 
+Keep reusable generator inputs at stable shared paths, for example
+`/data/$USER/offshell/software/vpolar` and
+`/data/$USER/offshell/gridpacks/PROCESS`. Build them with
+`Generation/VPolar/install_vpolar.sh` and `Generation/prepare_gridpack.sh`
+before submitting production. The HTCondor layer uses
+`should_transfer_files=NO`, so the repository, gridpack and metadata, VPolar
+prefix when applicable, Delphes installation, and output root must resolve at
+the same absolute paths on every execute node.
+
 ATLAS Local Root Base is provided through CVMFS at
 `/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase`. The documented non-interactive
 container pattern is:

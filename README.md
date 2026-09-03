@@ -62,27 +62,49 @@ Simulation/install_delphes.sh --prefix /data/$USER/software/offshell-delphes
 source Simulation/env.sh
 ```
 
-Then run a small end-to-end validation job:
+Prepare one reusable POWHEG integration-grid archive per process on a compute
+node or batch allocation. This is the expensive bootstrap step:
 
 ```bash
+Generation/prepare_gridpack.sh gg4l \
+  --events 50 --seed 101 \
+  --output-dir /data/$USER/offshell/gridpacks/gg4l
+
 Workflow/run_chain.sh gg4l \
-  --events 2 --seed 101 --job-id 0 --campaign-id 20260902 \
+  --events 2 --seed 102 --job-id 0 --campaign-id 20260902 \
+  --gridpack /data/$USER/offshell/gridpacks/gg4l/integration_grids.tar.gz \
   --output-dir /data/$USER/offshell/smoke/gg4l_job0
 ```
 
-For polarized samples, first build the shared generator stack once, then use
-the same workflow interface:
+For polarized samples, build the shared generator stack once and then prepare
+an independent native MadGraph gridpack for each required polarization:
 
 ```bash
 Generation/VPolar/install_vpolar.sh \
   --prefix /data/$USER/offshell/software/vpolar \
   --lhapdf-config /path/to/lhapdf-config --cores 8
 
-Workflow/run_chain.sh vpolar_LL \
-  --events 2 --seed 201 --job-id 0 --campaign-id 20260902 \
+Generation/prepare_gridpack.sh vpolar_LL \
   --generator-prefix /data/$USER/offshell/software/vpolar \
+  --seed 201 --cores 8 \
+  --output-dir /data/$USER/offshell/gridpacks/vpolar_LL
+
+Workflow/run_chain.sh vpolar_LL \
+  --events 2 --seed 202 --job-id 0 --campaign-id 20260902 \
+  --generator-prefix /data/$USER/offshell/software/vpolar \
+  --gridpack /data/$USER/offshell/gridpacks/vpolar_LL/vpolar_LL_gridpack.tar.gz \
   --output-dir /data/$USER/offshell/smoke/vpolar_LL_job0
 ```
+
+Gridpacks remove repeated integration, not hard-event evaluation, showering,
+simulation, or analysis. POWHEG packs are integration-grid archives and still
+require the pinned AthGeneration environment. VPolar packs use MadGraph's
+native frozen-grid mode and still require the exact validated shared prefix
+for the bound installation plus the LHAPDF and Pythia runtimes. VPolar gridpack
+execution is serial; parallel cores are useful while preparing the pack, not
+while consuming it. Multi-job Condor campaigns require a compatible pack and
+validate it before creating any submission files. A one-job gridless run
+remains available for smoke tests and diagnosis.
 
 Each stage also has a standalone runner and detailed README. The default
 generation release is `AthGeneration 23.6.41`; its transform writes EVNT,
@@ -136,8 +158,9 @@ defaults are intended only for smoke tests and other small jobs.
 
 After local smoke tests, `UChicagoAF/condor/submit_campaign.py` prepares
 deterministic shared-filesystem HTCondor campaigns. It supports all six sample
-names, gives jobs disjoint seeds and event-number ranges, and requires the
-shared VPolar prefix for polarized modes. See `UChicagoAF/condor/README.md`.
+names, gives jobs disjoint seeds and event-number ranges, requires a compatible
+gridpack whenever `--jobs` is greater than one, and requires the shared VPolar
+prefix for polarized modes. See `UChicagoAF/condor/README.md`.
 
 ## Tests
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -13,8 +14,8 @@ import tempfile
 from typing import Any
 
 
-CONTRACT = "oap-vpolar-installation-v4"
-SCHEMA_VERSION = 4
+CONTRACT = "oap-vpolar-installation-v5"
+SCHEMA_VERSION = 5
 PROCESSES = ("vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT")
 EXPECTED_DIAGRAM_COUNTS = {
     process: {"representatives": 44, "raw_equivalent": 86}
@@ -28,8 +29,8 @@ LOOP_REDUCTION = {
     "loop_optimized_output": True,
     "madloop_reduction_lib": "1",
     # In MadGraph terminology, ``external`` means that generated processes
-    # link the MadGraph-wide bundled vendor/CutTools build rather than copying
-    # or discovering a library from the ambient environment.
+    # link MadGraph-wide bundled vendor builds rather than copying or
+    # discovering reduction libraries from the ambient environment.
     "output_dependencies": "external",
     "ninja": None,
 }
@@ -55,6 +56,8 @@ REPOSITORY_INPUTS = (
     "prepare_lhe_for_shower.py",
     "canonicalize_hepmc.py",
     "run_vpolar_generation.sh",
+    "prepare_gridpack.sh",
+    "gridpack_metadata.py",
     "cards/process_vpolar_LL.mg5",
     "cards/process_vpolar_TT.mg5",
     "cards/process_vpolar_TL.mg5",
@@ -343,6 +346,33 @@ def _pdf_set_index(info_path: Path) -> int:
     return values[0]
 
 
+def _pdf_alpha_s_mz(info_path: Path) -> float:
+    try:
+        lines = info_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise ManifestError(f"could not read LHAPDF set metadata: {info_path}") from error
+    values: list[float] = []
+    for line in lines:
+        key, separator, value = line.partition(":")
+        if separator and key.strip() == "AlphaS_MZ":
+            try:
+                observed = float(value.strip())
+            except ValueError as error:
+                raise ManifestError(
+                    f"invalid AlphaS_MZ in LHAPDF metadata: {info_path}"
+                ) from error
+            if not math.isfinite(observed) or observed <= 0:
+                raise ManifestError(
+                    f"invalid AlphaS_MZ in LHAPDF metadata: {info_path}"
+                )
+            values.append(observed)
+    if len(values) != 1:
+        raise ManifestError(
+            f"expected one AlphaS_MZ value in LHAPDF metadata: {info_path}"
+        )
+    return values[0]
+
+
 def _lhapdf_fingerprint(lhapdf_config: Path, pdf_set_dir: Path) -> dict[str, Any]:
     """Fingerprint the exact LHAPDF code and central member used at runtime."""
 
@@ -356,6 +386,9 @@ def _lhapdf_fingerprint(lhapdf_config: Path, pdf_set_dir: Path) -> dict[str, Any
     if not libdir.is_dir():
         raise ManifestError(f"LHAPDF library directory is unavailable: {libdir}")
     library = _lhapdf_library(libdir)
+    static_library = _resolved_file(
+        libdir / "libLHAPDF.a", "LHAPDF static library required by MadEvent"
+    )
 
     try:
         set_dir = pdf_set_dir.expanduser().resolve(strict=True)
@@ -367,6 +400,7 @@ def _lhapdf_fingerprint(lhapdf_config: Path, pdf_set_dir: Path) -> dict[str, Any
         )
     info = _resolved_file(set_dir / f"{PDF_SET}.info", "LHAPDF set metadata")
     _pdf_set_index(info)
+    alpha_s_mz = _pdf_alpha_s_mz(info)
     member_candidates = [
         candidate
         for candidate in (
@@ -389,8 +423,13 @@ def _lhapdf_fingerprint(lhapdf_config: Path, pdf_set_dir: Path) -> dict[str, Any
         "prefix": str(prefix),
         "libdir": str(libdir),
         "library": {"path": str(library), "sha256": sha256(library)},
+        "static_library": {
+            "path": str(static_library),
+            "sha256": sha256(static_library),
+        },
         "pdf_set": PDF_SET,
         "pdf_id": PDF_ID,
+        "alpha_s_mz": alpha_s_mz,
         "pdf_set_dir": str(set_dir),
         "pdf_files": {
             "info": {"path": str(info), "sha256": sha256(info)},
@@ -473,7 +512,7 @@ def _process_bundle_fingerprint(prefix: Path, process: str) -> dict[str, Any]:
         raise ManifestError(f"unknown VPolar process {process!r}")
     prefix = prefix.expanduser().resolve()
     root = prefix / "processes" / process
-    global_cuttools = {
+    global_loop_libraries = {
         "libcts.a": _nonempty_file(
             prefix / "madgraph5" / "vendor" / "CutTools" / "includects" / "libcts.a",
             "bundled CutTools library",
@@ -481,6 +520,10 @@ def _process_bundle_fingerprint(prefix: Path, process: str) -> dict[str, Any]:
         "mpmodule.mod": _nonempty_file(
             prefix / "madgraph5" / "vendor" / "CutTools" / "includects" / "mpmodule.mod",
             "bundled CutTools module",
+        ),
+        "libiregi.a": _nonempty_file(
+            prefix / "madgraph5" / "vendor" / "IREGI" / "src" / "libiregi.a",
+            "bundled IREGI library",
         ),
     }
 
@@ -513,14 +556,23 @@ def _process_bundle_fingerprint(prefix: Path, process: str) -> dict[str, Any]:
         artifacts[relative] = sha256(installed)
 
     record(root / "bin" / "generate_events", f"{process} generator")
+    for filename in (
+        "madevent_interface.py",
+        "common_run_interface.py",
+        "gen_ximprove.py",
+    ):
+        record(
+            root / "bin" / "internal" / filename,
+            f"{process} native-gridpack runtime module {filename}",
+        )
     record(root / "Source" / "MODEL" / "model_functions.f", f"{process} model source")
     record(root / "Cards" / "MadLoopParams.dat", f"{process} MadLoop card")
-    for name, global_path in global_cuttools.items():
+    for name, global_path in global_loop_libraries.items():
         process_path = root / "lib" / name
-        installed = _nonempty_file(process_path, f"{process} CutTools {name}")
+        installed = _nonempty_file(process_path, f"{process} loop dependency {name}")
         if installed != global_path:
             raise ManifestError(
-                f"{process} {name} does not resolve to bundled CutTools: {installed}"
+                f"{process} {name} does not resolve to its bundled vendor build: {installed}"
             )
         artifacts[process_path.relative_to(root).as_posix()] = sha256(installed)
 
@@ -582,6 +634,9 @@ def _required_installation_paths(prefix: Path) -> tuple[Path, ...]:
     paths = [
         prefix / "madgraph5" / "VERSION",
         prefix / "madgraph5" / "bin" / "mg5_aMC",
+        prefix / "madgraph5" / "madgraph" / "interface" / "madevent_interface.py",
+        prefix / "madgraph5" / "madgraph" / "interface" / "common_run_interface.py",
+        prefix / "madgraph5" / "madgraph" / "madevent" / "gen_ximprove.py",
         prefix / "madgraph5" / "models" / "SM_Loop_ZPolar" / "particles.py",
         prefix
         / "madgraph5"
@@ -596,7 +651,67 @@ def _required_installation_paths(prefix: Path) -> tuple[Path, ...]:
         prefix / "madgraph5" / "input" / "mg5_configuration.txt",
         prefix / "madgraph5" / "vendor" / "CutTools" / "includects" / "libcts.a",
         prefix / "madgraph5" / "vendor" / "CutTools" / "includects" / "mpmodule.mod",
+        prefix / "madgraph5" / "vendor" / "IREGI" / "src" / "libiregi.a",
         prefix / "configure-madgraph.mg5",
+        prefix / "madgraph5" / "Template" / "LO" / "bin" / "internal" / "make_gridpack",
+        prefix / "madgraph5" / "Template" / "LO" / "bin" / "internal" / "store4grid",
+        prefix / "madgraph5" / "Template" / "LO" / "bin" / "internal" / "restore_data",
+        prefix
+        / "madgraph5"
+        / "Template"
+        / "LO"
+        / "bin"
+        / "internal"
+        / "Gridpack"
+        / "run.sh",
+        prefix
+        / "madgraph5"
+        / "Template"
+        / "LO"
+        / "bin"
+        / "internal"
+        / "Gridpack"
+        / "gridrun",
+        prefix
+        / "madgraph5"
+        / "Template"
+        / "LO"
+        / "bin"
+        / "internal"
+        / "Gridpack"
+        / "TheChopper-pl",
+        prefix
+        / "madgraph5"
+        / "Template"
+        / "LO"
+        / "bin"
+        / "internal"
+        / "Gridpack"
+        / "clean4grid",
+        prefix
+        / "madgraph5"
+        / "Template"
+        / "LO"
+        / "bin"
+        / "internal"
+        / "Gridpack"
+        / "compile",
+        prefix
+        / "madgraph5"
+        / "Template"
+        / "LO"
+        / "bin"
+        / "internal"
+        / "Gridpack"
+        / "refine4grid",
+        prefix
+        / "madgraph5"
+        / "Template"
+        / "LO"
+        / "bin"
+        / "internal"
+        / "Gridpack"
+        / "replace.pl",
         prefix / "heptools" / "pythia8" / "bin" / "pythia8-config",
         prefix
         / "heptools"
@@ -613,6 +728,7 @@ def _required_installation_paths(prefix: Path) -> tuple[Path, ...]:
                 root / "SubProcesses" / "subproc.mg",
                 root / "lib" / "libcts.a",
                 root / "lib" / "mpmodule.mod",
+                root / "lib" / "libiregi.a",
             )
         )
     return tuple(paths)
@@ -625,12 +741,26 @@ def _installed_fingerprints(
 
     file_paths = (
         "madgraph5/bin/mg5_aMC",
+        "madgraph5/madgraph/interface/madevent_interface.py",
+        "madgraph5/madgraph/interface/common_run_interface.py",
+        "madgraph5/madgraph/madevent/gen_ximprove.py",
         "madgraph5/input/mg5_configuration.txt",
         "madgraph5/madgraph/loop/loop_diagram_generation.py",
         "madgraph5/madgraph/loop/oap_vpolar_filter.py",
         "madgraph5/vendor/CutTools/includects/libcts.a",
         "madgraph5/vendor/CutTools/includects/mpmodule.mod",
+        "madgraph5/vendor/IREGI/src/libiregi.a",
         "configure-madgraph.mg5",
+        "madgraph5/Template/LO/bin/internal/make_gridpack",
+        "madgraph5/Template/LO/bin/internal/store4grid",
+        "madgraph5/Template/LO/bin/internal/restore_data",
+        "madgraph5/Template/LO/bin/internal/Gridpack/run.sh",
+        "madgraph5/Template/LO/bin/internal/Gridpack/gridrun",
+        "madgraph5/Template/LO/bin/internal/Gridpack/TheChopper-pl",
+        "madgraph5/Template/LO/bin/internal/Gridpack/clean4grid",
+        "madgraph5/Template/LO/bin/internal/Gridpack/compile",
+        "madgraph5/Template/LO/bin/internal/Gridpack/refine4grid",
+        "madgraph5/Template/LO/bin/internal/Gridpack/replace.pl",
         "heptools/pythia8/bin/pythia8-config",
         "heptools/MG5aMC_PY8_interface/MG5aMC_PY8_interface",
     )

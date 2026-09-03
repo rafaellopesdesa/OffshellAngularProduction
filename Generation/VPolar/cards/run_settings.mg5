@@ -1,6 +1,7 @@
 # Values substituted by run_vpolar_generation.sh before this card is used.
 set run_card nevents @GENERATED_EVENTS@
 set run_card iseed @SEED@
+set run_card python_seed -2
 set run_card lpp1 1
 set run_card lpp2 1
 set run_card ebeam1 6800

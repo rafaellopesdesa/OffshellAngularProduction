@@ -22,17 +22,28 @@ if str(CONDOR_DIR) not in sys.path:
 from repository_snapshot import SnapshotError, inspect_repository  # noqa: E402
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROCESSES = ("gg4l", "qqZZ", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT")
 VPOLAR_PROCESSES = frozenset({"vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"})
 MAX_JOB_ID = (1 << 32) - 1
 MAX_CAMPAIGN_ID = (1 << 64) - 1
 MAX_FIRST_EVENT = 999_999_999
 MAX_EVENTS_PER_JOB = 100_000
-MAX_LEGACY_SEED = 900_000_000
+MAX_POWHEG_SEED = 900_000_000
 MAX_VPOLAR_SEED = 900_000_000
 RESOURCE_RE = re.compile(r"[1-9][0-9]*(?:KB|MB|GB|TB)?", re.IGNORECASE)
 CONDOR_PATH_RE = re.compile(r"/[A-Za-z0-9._/+-]*")
+DEFAULT_ATHGENERATION_RELEASE = "23.6.41"
+ECM_ENERGY_GEV = 13_600
+# These are the public POWHEG configurations selected by Generation/run_generation.sh.
+# Keeping the mapping explicit makes campaign preparation fail closed if a card moves.
+POWHEG_GRIDPACK_CONFIG = {
+    "gg4l": (
+        100001,
+        "mc.PhPy8_NNPDF30_gg4l_full_2e2mu_m4l150_3000.py",
+    ),
+    "qqZZ": (100002, "mc.PhPy8EG_ZZ2e2mu_mll50.py"),
+}
 
 
 def positive_int(value: str) -> int:
@@ -124,6 +135,96 @@ def validate_vpolar_installation(
         )
 
 
+def _run_gridpack_validator(command: list[str], backend: str) -> None:
+    """Run a backend's authoritative semantic gridpack validator."""
+
+    try:
+        completed = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as error:
+        raise ValueError(f"could not validate {backend} --gridpack: {error}") from error
+    if completed.returncode != 0:
+        diagnostic = (completed.stderr or completed.stdout).strip()
+        raise ValueError(
+            f"--gridpack failed {backend} compatibility validation"
+            + (f": {diagnostic}" if diagnostic else "")
+        )
+
+
+def validate_powheg_gridpack(
+    repo_root: Path,
+    gridpack: Path,
+    metadata: Path,
+    process: str,
+    release: str,
+) -> None:
+    """Validate a POWHEG gridpack against this checkout and campaign setup."""
+
+    run_number, job_option_name = POWHEG_GRIDPACK_CONFIG[process]
+    job_option = (
+        repo_root
+        / "Generation"
+        / "jobOptions"
+        / str(run_number)
+        / job_option_name
+    )
+    validator = repo_root / "Generation" / "gridpack_metadata.py"
+    _run_gridpack_validator(
+        [
+            sys.executable,
+            str(validator),
+            "validate",
+            "--gridpack",
+            str(gridpack),
+            "--metadata",
+            str(metadata),
+            "--job-option",
+            str(job_option),
+            "--process",
+            process,
+            "--run-number",
+            str(run_number),
+            "--release",
+            release,
+            "--ecm-energy-gev",
+            str(ECM_ENERGY_GEV),
+        ],
+        "POWHEG",
+    )
+
+
+def validate_vpolar_gridpack(
+    repo_root: Path,
+    gridpack: Path,
+    metadata: Path,
+    generator_prefix: Path,
+    process: str,
+) -> None:
+    """Validate an integrated VPolar gridpack for the selected channel."""
+
+    validator = repo_root / "Generation" / "VPolar" / "gridpack_metadata.py"
+    _run_gridpack_validator(
+        [
+            sys.executable,
+            str(validator),
+            "validate",
+            "--gridpack",
+            str(gridpack),
+            "--metadata",
+            str(metadata),
+            "--generator-prefix",
+            str(generator_prefix),
+            "--process",
+            process,
+        ],
+        "VPolar",
+    )
+
+
 def readable_file(value: str | None, option: str) -> Path | None:
     if value is None:
         return None
@@ -131,6 +232,17 @@ def readable_file(value: str | None, option: str) -> Path | None:
     if not path.is_file() or not os.access(path, os.R_OK):
         raise ValueError(f"{option} is not a readable regular file: {path}")
     return path
+
+
+def file_sha256(path: Path, option: str) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise ValueError(f"could not hash {option}: {path}: {error}") from error
+    return digest.hexdigest()
 
 
 def directory(value: str | None, option: str) -> Path | None:
@@ -174,16 +286,32 @@ def parser() -> argparse.ArgumentParser:
         "--setup-script",
         help="optional shared shell script sourced by worker.sh before the workflow",
     )
-    result.add_argument("--release", help="AthGeneration release override (legacy only)")
-    result.add_argument("--gridpack", help="shared POWHEG gridpack (legacy only)")
-    result.add_argument("--gridpack-metadata", help="gridpack manifest (legacy only)")
+    result.add_argument(
+        "--release", help="AthGeneration release override (POWHEG processes only)"
+    )
+    result.add_argument(
+        "--gridpack",
+        help="shared compatible integration gridpack (required when --jobs > 1)",
+    )
+    result.add_argument(
+        "--gridpack-metadata",
+        help="gridpack manifest (default: GRIDPACK.metadata.json)",
+    )
     result.add_argument(
         "--no-generation-setup",
         action="store_true",
-        help="forward --no-generation-setup to the legacy workflow",
+        help="forward --no-generation-setup to the POWHEG/Athena workflow",
     )
     result.add_argument("--delphes-card", help="shared Delphes card override")
-    result.add_argument("--request-cpus", type=positive_int, default=1)
+    result.add_argument(
+        "--request-cpus",
+        type=positive_int,
+        default=1,
+        help=(
+            "Condor CPUs and VPolar gridless MadGraph cores (default: 1; "
+            "VPolar gridpack consumption is serial)"
+        ),
+    )
     result.add_argument("--request-memory", type=resource_value, default="4GB")
     result.add_argument("--request-disk", type=resource_value, default="20GB")
     action = result.add_mutually_exclusive_group()
@@ -226,7 +354,11 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
     if last_job_id > MAX_JOB_ID:
         raise ValueError(f"job IDs exceed the uint32 limit ({MAX_JOB_ID})")
     last_seed = args.seed_base + args.jobs - 1
-    max_seed = MAX_VPOLAR_SEED if args.process in VPOLAR_PROCESSES else MAX_LEGACY_SEED
+    max_seed = (
+        MAX_VPOLAR_SEED
+        if args.process in VPOLAR_PROCESSES
+        else MAX_POWHEG_SEED
+    )
     if last_seed > max_seed:
         raise ValueError(f"seeds exceed the {args.process} limit ({max_seed})")
     final_event = args.first_event + args.jobs * args.events_per_job - 1
@@ -276,21 +408,60 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
                 )
 
     setup_script = readable_file(args.setup_script, "--setup-script")
+    if args.gridpack_metadata is not None and args.gridpack is None:
+        raise ValueError("--gridpack-metadata requires --gridpack")
+    if args.jobs > 1 and args.gridpack is None:
+        raise ValueError(
+            "--gridpack is required when --jobs is greater than 1; "
+            "prepare and validate a gridpack first (only one-job pilots may omit it)"
+        )
     gridpack = readable_file(args.gridpack, "--gridpack")
     gridpack_metadata_value = args.gridpack_metadata
     if gridpack is not None and gridpack_metadata_value is None:
         gridpack_metadata_value = f"{gridpack}.metadata.json"
     gridpack_metadata = readable_file(gridpack_metadata_value, "--gridpack-metadata")
     delphes_card = readable_file(args.delphes_card, "--delphes-card")
-    if gridpack_metadata is not None and gridpack is None:
-        raise ValueError("--gridpack-metadata requires --gridpack")
-    if args.process in VPOLAR_PROCESSES and any(
-        (args.release, gridpack, gridpack_metadata, args.no_generation_setup)
+    if args.process in VPOLAR_PROCESSES and (
+        args.release is not None or args.no_generation_setup
     ):
         raise ValueError(
-            "--release, --gridpack, --gridpack-metadata, and "
-            "--no-generation-setup are legacy-generator options"
+            "--release and --no-generation-setup are POWHEG/Athena options"
         )
+    if (
+        args.process in VPOLAR_PROCESSES
+        and gridpack is not None
+        and args.request_cpus != 1
+    ):
+        raise ValueError(
+            "--request-cpus must be 1 when consuming a VPolar gridpack; "
+            "the pinned MadGraph gridpack runner is serial"
+        )
+    if gridpack is not None:
+        assert gridpack_metadata is not None
+        if args.process in VPOLAR_PROCESSES:
+            assert generator_prefix is not None
+            validate_vpolar_gridpack(
+                repo_root,
+                gridpack,
+                gridpack_metadata,
+                generator_prefix,
+                args.process,
+            )
+        else:
+            validate_powheg_gridpack(
+                repo_root,
+                gridpack,
+                gridpack_metadata,
+                args.process,
+                args.release or DEFAULT_ATHGENERATION_RELEASE,
+            )
+        gridpack_sha256 = file_sha256(gridpack, "--gridpack")
+        gridpack_metadata_sha256 = file_sha256(
+            gridpack_metadata, "--gridpack-metadata"
+        )
+    else:
+        gridpack_sha256 = None
+        gridpack_metadata_sha256 = None
 
     analysis_python = args.analysis_python
     if os.path.sep in analysis_python:
@@ -311,6 +482,8 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
         "setup_script": setup_script,
         "gridpack": gridpack,
         "gridpack_metadata": gridpack_metadata,
+        "gridpack_sha256": gridpack_sha256,
+        "gridpack_metadata_sha256": gridpack_metadata_sha256,
         "delphes_card": delphes_card,
         "analysis_python": analysis_python,
         "repository_snapshot": repository_snapshot,
@@ -362,6 +535,8 @@ def make_record(
             if resolved["gridpack_metadata"] is not None
             else None
         ),
+        "gridpack_sha256": resolved["gridpack_sha256"],
+        "gridpack_metadata_sha256": resolved["gridpack_metadata_sha256"],
         "no_generation_setup": bool(args.no_generation_setup),
         "delphes_card": (
             str(resolved["delphes_card"])
@@ -394,6 +569,10 @@ def campaign_manifest(
         "output_root": str(resolved["output_root"]),
         "campaign_dir": str(resolved["campaign_dir"]),
         "generator_prefix": records[0]["generator_prefix"],
+        "gridpack": records[0]["gridpack"],
+        "gridpack_metadata": records[0]["gridpack_metadata"],
+        "gridpack_sha256": records[0]["gridpack_sha256"],
+        "gridpack_metadata_sha256": records[0]["gridpack_metadata_sha256"],
         "resources": {
             "request_cpus": args.request_cpus,
             "request_memory": args.request_memory,

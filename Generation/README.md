@@ -39,17 +39,11 @@ On a UChicago AF host with ATLAS CVMFS mounted:
 ```bash
 cd OffshellAngularProduction/Generation
 
-# Small smoke tests first.
+# One-job gridless smoke tests only.
 ./run_generation.sh gg4l --events 2 --seed 101 \
   --output-dir /data/$USER/offshell/smoke/generation/gg4l_seed101
 ./run_generation.sh qqZZ --events 10 --seed 201 \
   --output-dir /data/$USER/offshell/smoke/generation/qqZZ_seed201
-
-# Normal local job sizes.
-./run_generation.sh gg4l --events 50 --seed 1101 \
-  --output-dir /data/$USER/offshell/production/gg4l_seed1101
-./run_generation.sh qqZZ --events 1000 --seed 1201 \
-  --output-dir /data/$USER/offshell/production/qqZZ_seed1201
 ```
 
 The wrapper sources
@@ -87,6 +81,49 @@ ATHENA_CORE_NUMBER=1 Gen_tf.py \
 `--outputEvtFile` is the correct HepMC option in release 23.6.41. Newer Athena
 main releases call the corresponding option `--outputHEPMCFile`; substituting
 that newer spelling in the pinned release will fail.
+
+## Prepare reusable gridpacks
+
+Never launch a multi-job production campaign gridless. Use the common
+preparation command once for each process on a compute node or batch
+allocation, with the exact release and physics configuration intended for
+production:
+
+```bash
+./prepare_gridpack.sh gg4l --events 50 --seed 1101 \
+  --output-dir /data/$USER/offshell/gridpacks/gg4l
+
+./prepare_gridpack.sh qqZZ --events 1000 --seed 1201 \
+  --output-dir /data/$USER/offshell/gridpacks/qqZZ
+```
+
+The required `--output-dir` must not exist. The command deliberately performs
+one ordinary gridless pilot with `run_generation.sh`, then requires `SUCCESS`,
+`integration_grids.tar.gz`, and its adjacent metadata manifest. It revalidates
+the finished archive against the process, complete job option, local run
+number, AthGeneration release, and 13600 GeV beam configuration before
+reporting success. The pilot's event products and logs remain beside the pack
+for physics and generator-diagnostic review.
+
+After validating the pilot, use the archive for every subsequent job:
+
+```bash
+./run_generation.sh gg4l --events 50 --seed 1102 \
+  --output-dir /data/$USER/offshell/production/gg4l_seed1102 \
+  --gridpack /data/$USER/offshell/gridpacks/gg4l/integration_grids.tar.gz
+```
+
+The adjacent `integration_grids.tar.gz.metadata.json` is selected by default.
+The event count, seed, and first-event number may vary between jobs; a process,
+card, release, energy, PDF, scale, cut, or integration-setting change requires
+a new pack. In particular, a qqZZ pack made before the current
+$m_{4\ell}>150$ GeV LHE-filter configuration is incompatible and must be
+rebuilt.
+
+The same top-level command dispatches `vpolar_LL`, `vpolar_TT`, `vpolar_TL`,
+and `vpolar_LT` to the native MadGraph gridpack builder. Those modes require
+one separate pack per polarization and the stable shared VPolar installation;
+see `VPolar/README.md`.
 
 ## Outputs
 
@@ -224,24 +261,19 @@ to a CERN EOS location that may not be readable at UChicago, it was integrated
 for `contr=no_h`, inclusive flavours, `mllmin=10`, and `m4lmin=70`. All four
 settings change here, so its grids and upper bounds are invalid.
 
-The first gg4l run without `--gridpack` may spend substantial time rebuilding
-the integration. The wrapper preserves the resulting grid archive and creates
-an adjacent metadata manifest that binds its SHA-256 digest to the complete job
-option, process, local run number, AthGeneration release, and 13600 GeV
-collision energy. After physics validation, reuse that exact file only for
-jobs with all of those settings unchanged:
+The dedicated `prepare_gridpack.sh` workflow above is the supported bootstrap
+for both `gg4l` and `qqZZ`. It converts PowhegControl's generated
+`integration_grids.tar.gz` into a checked production input by requiring and
+validating the adjacent repository manifest. This is an integration-grid and
+upper-bound archive, not a self-contained executable: every consuming job
+still needs the pinned AthGeneration environment and still performs hard-event
+generation, PDF/scale reweighting, Pythia, and downstream processing.
 
 Although the job option retains `manyseeds=1` and `parallelstage=4`, this does
 not require prebuilt grids. PowhegControl's RES multicore scheduler checks for
 each stage's grid files and rewrites `parallelstage` to 1, 2, 3, and 4 in turn;
 when no gridpack is present, the missing-file checks cause every required stage
 to run. `ATHENA_CORE_NUMBER=1` still uses this staged scheduler with one worker.
-
-```bash
-./run_generation.sh gg4l --events 50 --seed 1102 \
-  --output-dir /data/$USER/offshell/production/gg4l_seed1102 \
-  --gridpack /data/$USER/offshell/production/gg4l_seed1101/integration_grids.tar.gz
-```
 
 The default manifest path is `GRIDPACK.metadata.json`; use
 `--gridpack-metadata FILE` only if the two files were deliberately renamed or
@@ -253,13 +285,19 @@ rejected before extraction. Any change to the process contribution, masses,
 cuts, PDFs, scales, integration controls, or release requires fresh grids.
 Changing the 13600 GeV collision energy also requires fresh grids.
 
+The qqZZ pack avoids repeated POWHEG integration but cannot remove all of the
+per-job cost. POWHEG `ZZ` has no native four-lepton-mass bound, so low-mass hard
+events are generated before the local LHE filter rejects them. The gridpack
+therefore complements, rather than replaces, the LHE oversampling and
+pre-shower $m_{4\ell}$ selection.
+
 ## Tests
 
 The tests do not require Athena:
 
 ```bash
 uv run --frozen --extra test python -m pytest -q Generation/tests
-bash -n Generation/run_generation.sh
+bash -n Generation/*.sh
 ```
 
 They exercise exact named-weight matching with source-ID gaps, LHE truncation,

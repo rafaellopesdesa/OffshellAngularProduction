@@ -108,6 +108,8 @@ keys = {
     "release",
     "gridpack",
     "gridpack_metadata",
+    "gridpack_sha256",
+    "gridpack_metadata_sha256",
     "no_generation_setup",
     "delphes_card",
 }
@@ -115,7 +117,7 @@ if set(payload) != keys:
     missing = sorted(keys - set(payload))
     extra = sorted(set(payload) - keys)
     raise SystemExit(f"job-record keys differ from schema (missing={missing}, extra={extra})")
-if payload["schema_version"] != 1:
+if payload["schema_version"] != 2:
     raise SystemExit("unsupported job-record schema_version")
 if payload["process"] not in {
     "gg4l", "qqZZ", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"
@@ -149,13 +151,43 @@ for key in ("repository", "publish_dir", "failure_parent"):
     value = payload[key]
     if not isinstance(value, str) or not value.startswith("/") or "\x00" in value:
         raise SystemExit(f"{key} must be an absolute path")
-for key in (
-    "generator_prefix", "setup_script", "release", "gridpack",
-    "gridpack_metadata", "delphes_card"
-):
+for key in ("release",):
     value = payload[key]
     if value is not None and (not isinstance(value, str) or "\x00" in value):
         raise SystemExit(f"{key} must be a string or null")
+for key in (
+    "generator_prefix", "setup_script", "gridpack", "gridpack_metadata",
+    "delphes_card"
+):
+    value = payload[key]
+    if value is not None and (
+        not isinstance(value, str) or not value.startswith("/") or "\x00" in value
+    ):
+        raise SystemExit(f"{key} must be an absolute path or null")
+gridpack_fields = (
+    "gridpack", "gridpack_metadata", "gridpack_sha256",
+    "gridpack_metadata_sha256",
+)
+if any(payload[key] is None for key in gridpack_fields) and not all(
+    payload[key] is None for key in gridpack_fields
+):
+    raise SystemExit("gridpack paths and SHA-256 values must be null or set together")
+for key in ("gridpack_sha256", "gridpack_metadata_sha256"):
+    value = payload[key]
+    if value is not None and (
+        not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+    ):
+        raise SystemExit(f"{key} must be a lower-case SHA-256 digest or null")
+if payload["process"].startswith("vpolar_") and (
+    payload["release"] is not None or payload["no_generation_setup"]
+):
+    raise SystemExit("release and no_generation_setup are POWHEG/Athena-only")
+if (
+    payload["process"].startswith("vpolar_")
+    and payload["gridpack"] is not None
+    and generation_cores != 1
+):
+    raise SystemExit("VPolar gridpack consumption requires generation_cores=1")
 if not isinstance(payload["analysis_python"], str) or not payload["analysis_python"]:
     raise SystemExit("analysis_python must be a nonempty string")
 if not isinstance(payload["repository_revision"], str) or not re.fullmatch(
@@ -174,8 +206,8 @@ fields = [
     "repository_snapshot_sha256", "process", "events", "seed", "job_id",
     "campaign_id", "first_event", "publish_dir", "failure_parent",
     "generator_prefix", "generation_cores", "analysis_python", "setup_script",
-    "release", "gridpack", "gridpack_metadata", "no_generation_setup",
-    "delphes_card",
+    "release", "gridpack", "gridpack_metadata", "gridpack_sha256",
+    "gridpack_metadata_sha256", "no_generation_setup", "delphes_card",
 ]
 for key in fields:
     value = payload[key]
@@ -189,7 +221,7 @@ for key in fields:
 PY
 
 mapfile -d '' -t fields <"${parsed_record}"
-[[ ${#fields[@]} -eq 21 ]] || die "could not decode job record"
+[[ ${#fields[@]} -eq 23 ]] || die "could not decode job record"
 repository=${fields[0]}
 repository_revision=${fields[1]}
 repository_snapshot_contract=${fields[2]}
@@ -209,8 +241,10 @@ setup_script=${fields[15]}
 release=${fields[16]}
 gridpack=${fields[17]}
 gridpack_metadata=${fields[18]}
-no_generation_setup=${fields[19]}
-delphes_card=${fields[20]}
+expected_gridpack_sha256=${fields[19]}
+expected_gridpack_metadata_sha256=${fields[20]}
+no_generation_setup=${fields[21]}
+delphes_card=${fields[22]}
 
 repository=$(realpath -e -- "${repository}") \
   || die "repository does not exist"
@@ -265,6 +299,25 @@ if [[ -n ${generator_prefix} ]]; then
   [[ -f ${generator_prefix}/SUCCESS && \
      -f ${generator_prefix}/installation-manifest.json ]] \
     || die "generator prefix is not a complete VPolar installation"
+fi
+if [[ -n ${gridpack} ]]; then
+  gridpack=$(realpath -e -- "${gridpack}") \
+    || die "gridpack does not exist"
+  [[ -f ${gridpack} && -r ${gridpack} ]] \
+    || die "gridpack is not a readable regular file"
+  observed_gridpack_sha256=$(sha256sum -- "${gridpack}" | awk '{print $1}')
+  [[ ${observed_gridpack_sha256} == "${expected_gridpack_sha256}" ]] \
+    || die "gridpack changed after campaign preparation (SHA-256 mismatch)"
+  gridpack_metadata=$(realpath -e -- "${gridpack_metadata}") \
+    || die "gridpack metadata does not exist"
+  [[ -f ${gridpack_metadata} && -r ${gridpack_metadata} ]] \
+    || die "gridpack metadata is not a readable regular file"
+  observed_gridpack_metadata_sha256=$(
+    sha256sum -- "${gridpack_metadata}" | awk '{print $1}'
+  )
+  [[ ${observed_gridpack_metadata_sha256} == \
+     "${expected_gridpack_metadata_sha256}" ]] \
+    || die "gridpack metadata changed after campaign preparation (SHA-256 mismatch)"
 fi
 
 [[ ${publish_dir} == /* && ${failure_parent} == /* ]] \

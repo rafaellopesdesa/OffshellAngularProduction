@@ -37,6 +37,27 @@ Workflow/run_chain.sh vpolar_TT \
   --output-dir /data/$USER/offshell/smoke/vpolar_TT_job0
 ```
 
+These gridless commands are intended for one-job smoke tests. Before normal
+production, use `Generation/prepare_gridpack.sh` to build a separate compatible
+pack for `gg4l`, `qqZZ`, or each VPolar polarization, then pass it through the
+same workflow interface:
+
+```bash
+Workflow/run_chain.sh vpolar_TT \
+  --events 50 --seed 302 --job-id 1 --campaign-id 20260902 \
+  --generator-prefix /data/$USER/offshell/software/vpolar \
+  --gridpack /data/$USER/offshell/gridpacks/vpolar_TT/vpolar_TT_gridpack.tar.gz \
+  --generation-cores 1 \
+  --output-dir /data/$USER/offshell/production/vpolar_TT_job1
+```
+
+`--gridpack-metadata` is optional when the manifest is adjacent at
+`GRIDPACK.metadata.json`. Both files are resolved and checked before the stage
+directory is claimed; the generation backend then performs its full semantic
+compatibility validation. VPolar native gridpack runs are serial and therefore
+require `--generation-cores 1`. A gridless VPolar smoke job may use several
+cores for its repeated integration.
+
 The generation setup runs in a child process, so it cannot contaminate the
 simulation or Python environment of the caller. `Simulation/env.sh` must point
 to a Delphes build compatible with the active ROOT environment. Use
@@ -83,4 +104,6 @@ validation contract.
 `UChicagoAF/condor/submit_campaign.py` produces the job table and submit file,
 while `UChicagoAF/condor/worker.sh` invokes this script in execute-node scratch
 and publishes only the compact output and provenance. Submission is opt-in;
-campaign preparation alone does not call `condor_submit`.
+campaign preparation alone does not call `condor_submit`. Any campaign with
+more than one job requires a backend-compatible gridpack, preventing every
+worker from rebuilding and then discarding the same expensive integration.

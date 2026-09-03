@@ -222,6 +222,38 @@ def test_vpolar_generator_prefix_is_forwarded_to_generation(tmp_path: Path):
     assert forwarded[cores_index + 1] == "4"
 
 
+def test_vpolar_gridpack_is_forwarded_to_generation(tmp_path: Path):
+    runner = _workflow_fixture(tmp_path)
+    output = tmp_path / "stage"
+    arguments = tmp_path / "generation-arguments.txt"
+    prefix = tmp_path / "vpolar"
+    gridpack = tmp_path / "vpolar_LL_gridpack.tar.gz"
+    metadata = tmp_path / "vpolar_LL_gridpack.metadata.json"
+    gridpack.write_bytes(b"test gridpack")
+    metadata.write_text("{}\n", encoding="utf-8")
+
+    result = _run(
+        runner,
+        output,
+        "--generator-prefix",
+        prefix,
+        "--gridpack",
+        gridpack,
+        "--gridpack-metadata",
+        metadata,
+        process="vpolar_LL",
+        environment={"OAP_TEST_ARGUMENTS_FILE": str(arguments)},
+    )
+
+    assert result.returncode == 17
+    forwarded = arguments.read_text(encoding="utf-8").splitlines()
+    assert forwarded[0] == "vpolar_LL"
+    gridpack_index = forwarded.index("--gridpack")
+    assert forwarded[gridpack_index + 1] == str(gridpack.resolve())
+    metadata_index = forwarded.index("--gridpack-metadata")
+    assert forwarded[metadata_index + 1] == str(metadata.resolve())
+
+
 def test_vpolar_process_is_forwarded_to_simulation_preflight(tmp_path: Path):
     runner = _workflow_fixture(tmp_path)
     output = tmp_path / "stage"
