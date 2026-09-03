@@ -34,21 +34,21 @@ number of retained events gives the authoritative campaign normalization.
 
 For input job (j), the merger reads from `Runs`
 
-\[
+$$
 N_j=N_{\mathrm{generated},j},\qquad
 A_j=\sum_{\mathrm{accepted}}w,\qquad
 Q_j=\sum_{\mathrm{accepted}}w^2.
-\]
+$$
 
 It pools the primitive quantities before calculating
 
-\[
+$$
 \sigma_{\mathrm{filtered}}=
 \frac{\sum_j A_j}{\sum_j N_j},
 \qquad
 \delta\sigma_{\mathrm{filtered}}=
 \sqrt{\frac{Q-A^2/N}{N(N-1)}}.
-\]
+$$
 
 Rejected LHE trials enter this estimator with zero weight. The corresponding
 inclusive values are recomputed from the generated-weight moments in the same
@@ -56,10 +56,10 @@ way.
 
 The original signed `weight_lhe` is copied unchanged. A single common scale
 
-\[
+$$
 c=\frac{\sigma_{\mathrm{filtered}}}
         {\sum_{i\in\mathrm{Events}}w_i^{\mathrm{LHE}}}
-\]
+$$
 
 defines `weight_nominal_pb = c * weight_lhe`, so its sum closes exactly to the
 pooled filtered cross section. Positive and negative events always receive the
@@ -69,26 +69,26 @@ same scale; no absolute value or sign-dependent normalization is used.
 
 The merger uses the already stored Born-projected LHE coordinates
 `lhe_theta1`, `lhe_phi1`, `lhe_theta2`, and `lhe_phi2`. Here
-\(\Omega_1\) follows \(\mu^+\) in the dimuon rest frame and \(\Omega_2\)
-follows \(e^+\) in the dielectron rest frame. It does not recompute the Born
+$\Omega_1$ follows $\mu^+$ in the dimuon rest frame and $\Omega_2$
+follows $e^+$ in the dielectron rest frame. It does not recompute the Born
 projection and does not use the dressed, RECO, or standard five-angle fields.
 
-For modes \(\alpha=(\ell_1,m_1)\) and
-\(\beta=(\ell_2,m_2)\),
+For modes $\alpha=(\ell_1,m_1)$ and
+$\beta=(\ell_2,m_2)$,
 
-\[
+$$
 \mathcal Y^{(+)}_{\alpha\beta}=
 \frac{Y_\alpha(\Omega_1)Y_\beta(\Omega_2)+
       Y_\alpha(\Omega_2)Y_\beta(\Omega_1)}
      {\sqrt{2(1+\delta_{\alpha\beta})}}.
-\]
+$$
 
 For every requested component the output stores:
 
-- `truth_h_<slug>` = \(\operatorname{Re}\mathcal Y^{(+)*}\), the bare
+- `truth_h_<slug>` = $\operatorname{Re}\mathcal Y^{(+)*}$, the bare
   symmetric basis element used in the earlier truth-reweighting notebook;
 - `truth_factor_<slug>` =
-  \(4\pi\operatorname{Re}\mathcal Y^{(+)*}\), the dimensionless projector;
+  $4\pi\operatorname{Re}\mathcal Y^{(+)*}$, the dimensionless projector;
 - `weight_truth_<slug>_pb` = `weight_nominal_pb * truth_factor_<slug>`, the
   signed event contribution in pb.
 
@@ -96,14 +96,14 @@ The branch-safe component slugs are:
 
 | Component | Slug |
 |---|---|
-| \((0,0;2,0)\) | `00_20` |
-| \((2,0;2,0)\) | `20_20` |
-| \((2,-1;2,1)\) | `2m1_2p1` |
-| \((2,-2;2,2)\) | `2m2_2p2` |
+| $(0,0;2,0)$ | `00_20` |
+| $(2,0;2,0)$ | `20_20` |
+| $(2,-1;2,1)$ | `2m1_2p1` |
+| $(2,-2;2,2)$ | `2m2_2p2` |
 
 Thus a coefficient in any kinematic bin is the sum of the corresponding
 `weight_truth_<slug>_pb` values over rows with `truth_lhe_valid=true`. There is
-no division by \(S_{00;00}\). All four projectors are real algebraically.
+no division by $S_{00;00}$. All four projectors are real algebraically.
 Invalid LHE projections remain in `Events`, with `truth_lhe_valid=false` and
 `NaN` truth fields. A usual sum-of-squared-event-weights uncertainty can be
 formed from these contributions; it does not include the separately reported
@@ -115,16 +115,16 @@ finite-LHE uncertainty of the pooled cross-section normalization.
 ordinary merger, one for each separately generated VPolar channel. The label
 order is fixed throughout the repository:
 
-\[
+$$
 Z_1\to\mu^+\mu^-,\qquad Z_2\to e^+e^-.
-\]
+$$
 
 Thus `TL` means a transverse dimuon system and a longitudinal dielectron
 system, while `LT` means the converse. The four inputs must be separately
 generated `LL`, `TT`, `TL`, and `LT` samples. A coherent one-amplitude
 `TL+LT` file is deliberately rejected. Here “interference-free” refers to the
 separation of the longitudinal/transverse channels: VPolar's `ZT` propagator
-remains the intended coherent sum of the \(\lambda=+1\) and \(-1\) transverse
+remains the intended coherent sum of the $\lambda=+1$ and $-1$ transverse
 helicities.
 
 Run the composer after merging the jobs within each polarization channel:
@@ -140,33 +140,33 @@ uv run python Merging/compose_polarized_components.py \
 
 For a single vector-boson decay, define
 
-\[
+$$
 a_L=-\frac{1}{\sqrt{5}},\qquad
 a_T=\frac{1}{2\sqrt{5}}.
-\]
+$$
 
 The exchange-symmetric basis then gives
 
-\[
+$$
 C_{00;20}(h_1h_2)=\frac{a_{h_1}+a_{h_2}}{\sqrt{2}},
 \qquad
 C_{20;20}(h_1h_2)=a_{h_1}a_{h_2}.
-\]
+$$
 
 Equivalently, with
-\(\sigma_M=\sigma_{TL}+\sigma_{LT}\),
+$\sigma_M=\sigma_{TL}+\sigma_{LT}$,
 
-\[
+$$
 S_{00;20}=-\sqrt{\frac{2}{5}}\,\sigma_{LL}
  +\frac{1}{\sqrt{10}}\,\sigma_{TT}
  -\frac{1}{\sqrt{40}}\,\sigma_M,
-\]
+$$
 
-\[
+$$
 S_{20;20}=\frac{1}{5}\,\sigma_{LL}
  +\frac{1}{20}\,\sigma_{TT}
  -\frac{1}{10}\,\sigma_M.
-\]
+$$
 
 The output contains one concatenated `Events` tree, two signed angular-component
 samples, and one direct incoherent mixed-polarization sample:
@@ -174,11 +174,11 @@ samples, and one direct incoherent mixed-polarization sample:
 | Branch | Meaning |
 |---|---|
 | `source_polarization_code` | `0=LL`, `1=TT`, `2=TL`, `3=LT` |
-| `polarization_coefficient_00_20` | Constant source-channel multiplier for \((0,0;2,0)\) |
-| `polarization_coefficient_20_20` | Constant source-channel multiplier for \((2,0;2,0)\) |
+| `polarization_coefficient_00_20` | Constant source-channel multiplier for $(0,0;2,0)$ |
+| `polarization_coefficient_20_20` | Constant source-channel multiplier for $(2,0;2,0)$ |
 | `polarization_coefficient_mixed_incoherent` | `1` for TL/LT and `0` for LL/TT |
-| `weight_polcomb_00_20_pb` | Signed \((0,0;2,0)\) sample weight |
-| `weight_polcomb_20_20_pb` | Signed \((2,0;2,0)\) sample weight |
+| `weight_polcomb_00_20_pb` | Signed $(0,0;2,0)$ sample weight |
+| `weight_polcomb_20_20_pb` | Signed $(2,0;2,0)$ sample weight |
 | `weight_mixed_incoherent_pb` | Direct incoherent TL+LT sample weight |
 
 Every original event branch, including `weight_lhe`, `weight_nominal_pb`, and
@@ -187,7 +187,7 @@ weights are each source's already normalized `weight_nominal_pb` multiplied by
 the corresponding constant above; the signed results are never renormalized.
 For direct mixed-polarization use, `weight_mixed_incoherent_pb` preserves the
 nominal TL and LT weights and assigns zero to LL and TT, so its integral is
-exactly \(\sigma_{TL}+\sigma_{LT}\) without a coherent TL/LT interference term.
+exactly $\sigma_{TL}+\sigma_{LT}$ without a coherent TL/LT interference term.
 `PolarizationSources` records the four source cross sections and their
 contributions, while `PolarizationCombinationSummary` records the resulting
 signed integrals and sum-of-squared-weight diagnostics. The original `Runs`
@@ -216,7 +216,7 @@ are retained in `PolarizationSources`; they are not combined because the
 cross-channel covariance is generally unknown.
 
 This is principally a production-level closure construction. The constant
-coefficients map the polarized rates to the two symmetric \(m=0\) moments after
+coefficients map the polarized rates to the two symmetric $m=0$ moments after
 complete decay-angle integration. Once angle-dependent lepton acceptance or a
 detector response is imposed, it need not equal the direct event-by-event
 harmonic projection in `weight_truth_*_pb`. The acceptance-free LHE comparison

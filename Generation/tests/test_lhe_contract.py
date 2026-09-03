@@ -53,7 +53,7 @@ def test_filters_before_shower_and_injects_stable_source_ids(tmp_path: Path):
     archive = tmp_path / "LHE.TXT.tar.gz"
     metadata = tmp_path / "lhe-contract-metadata.json"
     lhe.write_text(
-        _document([_event(120.0), _event(200.0, -2.0), _event(3500.0, 3.0)])
+        _document([_event(160.0), _event(200.0, -2.0), _event(3500.0, 3.0)])
     )
 
     result = CONTRACT.prepare_lhe_for_shower(
@@ -61,7 +61,7 @@ def test_filters_before_shower_and_injects_stable_source_ids(tmp_path: Path):
         archive,
         process="qqZZ",
         requested_events=1,
-        min_m4l=70.0,
+        min_m4l=150.0,
         max_m4l=3000.0,
         metadata_path=metadata,
     )
@@ -109,11 +109,36 @@ def test_fails_if_filter_safety_margin_cannot_fill_transform(tmp_path: Path):
             archive,
             process="qqZZ",
             requested_events=1,
-            min_m4l=70.0,
+            min_m4l=150.0,
             max_m4l=3000.0,
             metadata_path=tmp_path / "metadata.json",
         )
     assert "AUX_OAP_EVENT_ID" not in lhe.read_text()
+
+
+def test_qqzz_rejects_events_below_150_gev_before_showering(tmp_path: Path):
+    lhe = tmp_path / "LHE.TXT.events"
+    archive = tmp_path / "LHE.TXT.tar.gz"
+    metadata = tmp_path / "lhe-contract-metadata.json"
+    lhe.write_text(_document([_event(120.0), _event(200.0)]))
+
+    result = CONTRACT.prepare_lhe_for_shower(
+        lhe,
+        archive,
+        process="qqZZ",
+        requested_events=1,
+        min_m4l=150.0,
+        max_m4l=3000.0,
+        metadata_path=metadata,
+    )
+
+    output = lhe.read_text()
+    assert output.count("<event>") == 1
+    assert "# AUX_OAP_EVENT_ID 1" not in output
+    assert "# AUX_OAP_EVENT_ID 2" in output
+    assert result["m4l_min_gev"] == 150.0
+    assert result["rejected_below_m4l"] == 1
+    assert result["accepted_lhe_events"] == 1
 
 
 def test_rejects_truncated_lhe_without_repairing_source(tmp_path: Path):

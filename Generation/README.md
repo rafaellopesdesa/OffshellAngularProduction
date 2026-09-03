@@ -117,16 +117,18 @@ Generated run directories are intentionally not committed.
 
 ## Exact LHE-to-HepMC association
 
-When `Gen_tf.py` is asked for EVNT output, PowhegControl creates
+When `Gen_tf.py` is asked for EVNT output, PowhegControl starts with
 
 ```text
 int(1.1 * maxEvents + 0.5)
 ```
 
-LHE events as a showering safety margin. After POWHEG completes and before
-Pythia begins, `offshell_lhe_contract.prepare_lhe_for_shower`:
+LHE events as a showering safety margin. The qqZZ job option doubles that base
+stream (approximately $2.2\,N$ events) to leave headroom for its active
+pre-shower mass filter. After POWHEG completes and before Pythia begins,
+`offshell_lhe_contract.prepare_lhe_for_shower`:
 
-- applies the configured LHE-level \(m_{4\ell}\) range;
+- applies the configured LHE-level $m_{4\ell}$ range;
 - adds two named technical weights, `AUX_OAP_EVENT_ID` and
   `AUX_OAP_EVENT_UNIT`, without changing the nominal physics weight;
 - assigns the original positive source-event index to the first weight and one
@@ -194,16 +196,19 @@ The exact decay-mode spelling is one of the modes accepted by the
 The POWHEG ZZ process exposes `mllmin` but no native `m4lmin` or `m4lmax`.
 ATLAS's neighboring official m4l-sliced samples use a post-Pythia
 [`FourLeptonInvMassFilter`](https://gitlab.cern.ch/atlas-physics/pmg/mcjoboptions/-/blob/78cb99075450b6505fa923e44ec8d3c0ff29c5a8/603xxx/603270/mc.PhPy8EG_ZZllll_mll4_m4l100_170.py).
-This project instead applies \(70\leq m_{4\ell}\leq3000\) GeV directly to the
+This project instead applies $150\leq m_{4\ell}\leq3000$ GeV directly to the
 completed LHE stream before Pythia reads it. The filtered/tagged stream is also
 repacked into `LHE.TXT.tar.gz`, so the sidecar and shower input are the same.
 No post-shower `FourLeptonInvMassFilter` is configured.
 
-For exclusive `2e2mu` with both generated dilepton systems above 50 GeV,
-hard-process kinematics already imply \(m_{4\ell}\geq100\) GeV, so the 70 GeV
-lower edge is redundant. The 3000 GeV upper edge is active. Neither edge is a
+The 150 GeV lower edge aligns qqZZ with the gg4l and VPolar generation phase
+space, while the 3000 GeV upper edge remains active. Neither edge is a
 reconstructed analysis cut: the current selection has only
-\(m_{4\ell}>180\) GeV and `analysis_m4l_max_gev=none`.
+$m_{4\ell}>180$ GeV and `analysis_m4l_max_gev=none`.
+Because POWHEG `ZZ` has no native four-lepton-mass keyword, the rejected hard
+events are still generated; the computational saving starts with Pythia and
+the downstream simulation and analysis stages. The doubled LHE safety stream
+prevents the new filter from relying on PowhegControl's standard 10% margin.
 
 The helper requires POWHEG `IDWTUP=-4` and records the authoritative filtered
 cross section as `sumw_accepted / generated_lhe_events`, in pb. Rejected events

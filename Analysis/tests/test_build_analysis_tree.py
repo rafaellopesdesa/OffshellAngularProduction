@@ -218,7 +218,7 @@ def _write_provenance(
         "vpolar_LT": 100006,
     }
     run_number = run_numbers[process]
-    m4l_min = 150 if process == "gg4l" or process.startswith("vpolar_") else 70
+    m4l_min = 150
     backend_metadata = (
         "generator_backend=madgraph5-pythia8-vpolar-standalone\n"
         "matrix_element_seed=17\n"

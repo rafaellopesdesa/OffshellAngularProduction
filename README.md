@@ -1,6 +1,6 @@
 # Off-shell angular production
 
-This repository builds matched off-shell \(ZZ\to e^-e^+\mu^-\mu^+\) samples
+This repository builds matched off-shell $ZZ\to e^-e^+\mu^-\mu^+$ samples
 from either ATLAS event generation or standalone VPolarized MadGraph through a compact angular-analysis ROOT tree. It is
 adapted for the UChicago Analysis Facility and combines the production pattern
 of
@@ -26,9 +26,9 @@ The production modes are:
 
 | Sample | Hard process | Generation phase space |
 |---|---|---|
-| `gg4l` | full Higgs + continuum + interference, exclusive `2e2mu` | \(50\leq m_{\ell\ell}\leq200\) GeV, \(150\leq m_{4\ell}\leq3000\) GeV |
-| `qqZZ` | quark-initiated continuum, exclusive `2e2mu` | \(m_{\ell\ell}\geq50\) GeV, \(70\leq m_{4\ell}\leq3000\) GeV at LHE level |
-| `vpolar_LL/TT/TL/LT` | full loop-induced Higgs + continuum + interference in a fixed polarization channel, exclusive `2e2mu` | \(50\leq m_{\ell\ell}\leq200\) GeV, \(150\leq m_{4\ell}\leq3000\) GeV |
+| `gg4l` | full Higgs + continuum + interference, exclusive `2e2mu` | $50\leq m_{\ell\ell}\leq200$ GeV, $150\leq m_{4\ell}\leq3000$ GeV |
+| `qqZZ` | quark-initiated continuum, exclusive `2e2mu` | $m_{\ell\ell}\geq50$ GeV, $150\leq m_{4\ell}\leq3000$ GeV at LHE level |
+| `vpolar_LL/TT/TL/LT` | full loop-induced Higgs + continuum + interference in a fixed polarization channel, exclusive `2e2mu` | $50\leq m_{\ell\ell}\leq200$ GeV, $150\leq m_{4\ell}\leq3000$ GeV |
 
 Every generation configuration requests the exclusive `2e2mu` state and uses
 Pythia8. Herwig is not part of the chain.
@@ -99,8 +99,8 @@ signed LHE weights, raw and Born-projected lepton four-vectors, kinematics, and
 helicity angles independently at LHE, dressed, and RECO level. Missing RECO
 candidates remain as rows with false masks and `NaN` RECO values. The
 `reconstructed` flag applies the strict off-shell RECO selection, including
-both \(50<m_Z<106\) GeV windows and \(m_{4\ell}>180\) GeV.
-There is no upper RECO \(m_{4\ell}\) cut.
+both $50<m_Z<106$ GeV windows and $m_{4\ell}>180$ GeV.
+There is no upper RECO $m_{4\ell}$ cut.
 
 After producing several job outputs, `Merging/merge_analysis_outputs.py`
 combines them without changing the raw signed `weight_lhe` branch. It pools the
@@ -113,11 +113,14 @@ symmetric angular projectors from the Born-projected LHE helicity angles. See
 
 POWHEG's `ZZ` interface exposes the dilepton lower cut but no native four-lepton
 mass limits. The local job option therefore filters the completed hard-event
-LHE stream to \(70\leq m_{4\ell}\leq3000\) GeV **before** Pythia and records
+LHE stream to $150\leq m_{4\ell}\leq3000$ GeV **before** Pythia and records
 generated/accepted counts, signed sums, absolute-weight sums, and both filter
 efficiencies in `lhe-contract-metadata.json`. No post-shower Athena filter is
-used. The 70 GeV lower edge is kinematically redundant once both generated
-dileptons exceed 50 GeV, but the bound is still enforced and recorded.
+used. The 150 GeV lower edge aligns qqZZ with the gg4l and VPolar generation
+phase space; both bounds are enforced and recorded.
+The qqZZ card doubles PowhegControl's standard 10% LHE safety stream to provide
+headroom for this active filter. Since POWHEG `ZZ` has no native $m_{4\ell}$
+cut, the savings begin at Pythia and continue through simulation and analysis.
 
 For the required POWHEG `IDWTUP=-4` strategy, normalization is derived before
 showering from the signed LHE weights: the filtered cross section is the sum of

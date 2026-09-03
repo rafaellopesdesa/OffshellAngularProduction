@@ -10,7 +10,7 @@
 # -----------------------------------------------------------------------------
 evgenConfig.description = (
     "POWHEG+Pythia8 ZZ->2e2mu production with PDF4LHC21 PDF variations, "
-    "A14 tune, and mllmin=50 GeV"
+    "A14 tune, mllmin=50 GeV, and 150 <= m4l <= 3000 GeV at LHE level"
 )
 evgenConfig.keywords = ["electroweak", "diboson", "ZZ", "4lepton"]
 evgenConfig.contact = ["chiara.arcangeletti@cern.ch"]
@@ -34,6 +34,10 @@ PowhegConfig.PDF = (
 )
 PowhegConfig.mu_F = [1.0, 0.5, 0.5, 0.5, 1.0, 1.0, 2.0, 2.0, 2.0]
 PowhegConfig.mu_R = [1.0, 0.5, 1.0, 2.0, 0.5, 2.0, 0.5, 1.0, 2.0]
+# PowhegControl's standard 10% shower margin can be insufficient once the
+# active pre-shower m4l filter is applied. Double that base LHE stream so the
+# requested HepMC event count has additional filtering headroom.
+PowhegConfig.nEvents *= 2.0
 PowhegConfig.generate()
 
 # POWHEG ZZ has no native m4l keywords. Apply the requested hard-event range
@@ -46,7 +50,7 @@ prepare_lhe_for_shower(
     runArgs.outputTXTFile,
     process="qqZZ",
     requested_events=runArgs.maxEvents,
-    min_m4l=70.0,
+    min_m4l=150.0,
     max_m4l=3000.0,
 )
 

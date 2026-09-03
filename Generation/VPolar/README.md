@@ -1,7 +1,7 @@
 # VPolarized standalone generation
 
 This backend produces polarized loop-induced
-\(gg\to e^+e^-\mu^+\mu^-\) events using the `SM_Loop_ZPolar` UFO from
+$gg\to e^+e^-\mu^+\mu^-$ events using the `SM_Loop_ZPolar` UFO from
 [VPolarization](https://feynrules.irmp.ucl.ac.be/wiki/VPolarization), following
 the construction of [arXiv:2401.17365](https://arxiv.org/abs/2401.17365).
 It is separate from the ATLAS `Gen_tf.py` backend because this UFO and its
@@ -13,8 +13,8 @@ Every process in this directory has the same deliberately narrow definition:
 - the full Higgs-mediated plus continuum-box amplitude, including their
   interference;
 - no photon-mediated diagrams;
-- \(50\leq m_{ee},m_{\mu\mu}\leq200\) GeV and
-  \(150\leq m_{4\ell}\leq3000\) GeV; and
+- $50\leq m_{ee},m_{\mu\mu}\leq200$ GeV and
+  $150\leq m_{4\ell}\leq3000$ GeV; and
 - 13.6 TeV proton-proton collisions.
 
 There are no signal-only, background-only, inclusive-flavour, or on-shell

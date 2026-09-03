@@ -24,6 +24,7 @@ class GenerationConfigurationTest(unittest.TestCase):
             "PowhegConfig.m4lmax = 3000",
         ):
             self.assertIn(setting, card)
+        self.assertNotIn("PowhegConfig.nEvents *=", card)
         self.assertNotIn("GeneratorFilters/", card)
 
     def test_qqzz_physics_configuration(self) -> None:
@@ -34,6 +35,13 @@ class GenerationConfigurationTest(unittest.TestCase):
             'PowhegConfig.decay_mode = "z z > mu+ mu- e+ e-"', card
         )
         self.assertIn("PowhegConfig.mllmin = 50.0", card)
+        self.assertIn("min_m4l=150.0", card)
+        self.assertIn("max_m4l=3000.0", card)
+        self.assertIn("PowhegConfig.nEvents *= 2.0", card)
+        self.assertLess(
+            card.index("PowhegConfig.nEvents *= 2.0"),
+            card.index("PowhegConfig.generate()"),
+        )
         self.assertIn(
             'evgenConfig.generators = ["Powheg", "Pythia8", "EvtGen"]', card
         )
@@ -65,6 +73,8 @@ class GenerationConfigurationTest(unittest.TestCase):
 
         runner = (GENERATION_DIR / "run_generation.sh").read_text(encoding="utf-8")
         self.assertIn('"$SCRIPT_DIR/align_lhe_events.py"', runner)
+        self.assertEqual(runner.count("GENERATOR_M4L_MIN_GEV=150"), 2)
+        self.assertNotIn("GENERATOR_M4L_MIN_GEV=70", runner)
         for option in (
             "--lhe-contract-metadata",
             "--expected-m4l-min",
