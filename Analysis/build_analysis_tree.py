@@ -1491,19 +1491,27 @@ def load_and_validate_provenance(
         raise ProvenanceError("alignment.hepmc_weight_names must be a string array")
     if len(set(hepmc_weight_names)) != len(hepmc_weight_names):
         raise ProvenanceError("alignment.hepmc_weight_names contains duplicate names")
-    for index, expected_name in (
-        (marker_id_index, MARKER_ID_WEIGHT_NAME),
-        (marker_unit_index, MARKER_UNIT_WEIGHT_NAME),
-    ):
+    for index in (marker_id_index, marker_unit_index):
         if index >= len(hepmc_weight_names):
             raise ProvenanceError(
                 f"alignment marker index {index} exceeds HepMC weight-name array"
             )
-        if hepmc_weight_names[index] != expected_name:
-            raise ProvenanceError(
-                f"alignment HepMC weight index {index} is "
-                f"{hepmc_weight_names[index]!r}, expected {expected_name!r}"
-            )
+
+    named_marker_schema = (
+        hepmc_weight_names[marker_id_index] == MARKER_ID_WEIGHT_NAME
+        and hepmc_weight_names[marker_unit_index] == MARKER_UNIT_WEIGHT_NAME
+    )
+
+    expected_numeric_names = [
+        str(index) for index in range(len(hepmc_weight_names))
+    ]
+    numeric_marker_schema = hepmc_weight_names == expected_numeric_names
+
+    if not (named_marker_schema or numeric_marker_schema):
+        raise ProvenanceError(
+            "alignment HepMC weight-name schema is neither the named OAP marker "
+            "schema nor the canonical numeric EVNTtoHEPMC schema"
+        )
     source_id_sequence_sha = _sha256_value(
         _required(marker, "source_id_sequence_sha256", "alignment.marker"),
         "alignment.marker.source_id_sequence_sha256",
@@ -2241,6 +2249,7 @@ def build_analysis_tree(
     schema = output_schema()
     event_count = 0
     event_number_start: int | None = None
+    previous_event_number: int | None = None
     positive_weights = 0
     negative_weights = 0
     zero_weights = 0
@@ -2333,13 +2342,17 @@ def build_analysis_tree(
                                     f"metadata: tree={event_number_start}, "
                                     f"generation={expected_first_event}"
                                 )
-                        expected_number = event_number_start + ordinal
-                        if number != expected_number:
+                        if (
+                            previous_event_number is not None
+                            and number <= previous_event_number
+                        ):
                             raise MatchError(
-                                "Delphes Event.Number is not a unique contiguous "
-                                f"unit-step sequence: entry {ordinal} has {number}, "
-                                f"expected {expected_number}"
+                                "Delphes Event.Number is not a strictly increasing "
+                                f"unique sequence: entry {ordinal} has {number}, "
+                                f"previous entry had {previous_event_number}"
                             )
+
+                        previous_event_number = number
                         if int(lhe_record["lhe_event_index"]) != ordinal:
                             raise RuntimeError(
                                 "LHE iterator did not preserve source ordinal"

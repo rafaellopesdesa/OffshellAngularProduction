@@ -213,7 +213,6 @@ fi
 TRANSFORM=(
   Gen_tf.py
   "--ecmEnergy=$ECM_ENERGY_GEV"
-  "--runNumber=$RUN_NUMBER"
   "--firstEvent=$FIRST_EVENT"
   "--maxEvents=$EVENTS"
   "--randomSeed=$SEED"

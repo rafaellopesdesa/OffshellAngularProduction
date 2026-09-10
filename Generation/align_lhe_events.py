@@ -233,32 +233,75 @@ def read_hepmc_source_ids(
 
     def finish_event(names: list[str], line_number: int) -> None:
         nonlocal canonical_names, id_index, unit_index, current
+
         if current is None:
-            raise AlignmentError(f"HepMC N record before E record at line {line_number}")
+            raise AlignmentError(
+                f"HepMC N record before E record at line {line_number}"
+            )
+
         event_number, weights, event_line = current
+
         if len(names) != len(weights):
             raise AlignmentError(
-                f"HepMC E/N weight count mismatch at lines {event_line}/{line_number}"
+                f"HepMC E/N weight count mismatch at lines "
+                f"{event_line}/{line_number}"
             )
+
         if canonical_names is None:
             canonical_names = names
-            for required in (MARKER_ID_WEIGHT, MARKER_UNIT_WEIGHT):
-                if required not in names:
-                    raise AlignmentError(f"HepMC is missing named marker weight {required}")
-            id_index = names.index(MARKER_ID_WEIGHT)
-            unit_index = names.index(MARKER_UNIT_WEIGHT)
+
+            if (
+                MARKER_ID_WEIGHT in names
+                and MARKER_UNIT_WEIGHT in names
+            ):
+                id_index = names.index(MARKER_ID_WEIGHT)
+                unit_index = names.index(MARKER_UNIT_WEIGHT)
+
+            else:
+                expected_numeric_names = [
+                    str(index) for index in range(len(names))
+                ]
+
+                if names != expected_numeric_names:
+                    raise AlignmentError(
+                        "HepMC weight names contain neither the OAP marker "
+                        "names nor the expected numeric EVNTtoHEPMC schema"
+                    )
+
+                id_index, unit_index = _read_evnt_marker_indices(path)
+
+                if (
+                    id_index >= len(names)
+                    or unit_index >= len(names)
+                ):
+                    raise AlignmentError(
+                        "EVNT marker-weight index exceeds the HepMC weight count"
+                    )
+
         elif names != canonical_names:
-            raise AlignmentError(f"HepMC weight names change at line {line_number}")
-        source_id = _decode_source_id(weights[id_index], weights[unit_index])
+            raise AlignmentError(
+                f"HepMC weight names change at line {line_number}"
+            )
+
+        source_id = _decode_source_id(
+            weights[id_index],
+            weights[unit_index],
+        )
+
         if source_ids and source_id <= source_ids[-1]:
-            raise AlignmentError("decoded HepMC source IDs are not strictly increasing")
+            raise AlignmentError(
+                "decoded HepMC source IDs are not strictly increasing"
+            )
+
         if event_number in seen_event_numbers:
-            raise AlignmentError(f"duplicate HepMC event number {event_number}")
+            raise AlignmentError(
+                f"duplicate HepMC event number {event_number}"
+            )
+
         seen_event_numbers.add(event_number)
         event_numbers.append(event_number)
         source_ids.append(source_id)
         current = None
-
     with opener(path, "rt", encoding="utf-8", errors="strict") as stream:
         for line_number, line in enumerate(stream, start=1):
             if line.startswith("HepMC::Version"):
@@ -899,6 +942,83 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--release")
     parser.add_argument("--contract", required=True, choices=(CONTRACT,))
     return parser.parse_args()
+
+
+def _read_evnt_marker_indices(hepmc_path: Path) -> tuple[int, int]:
+    """Recover the marker-weight indices from the sibling EVNT metadata."""
+
+    import ast
+
+    try:
+        from PyUtils.MetaReader import read_metadata
+    except ImportError as error:
+        raise AlignmentError(
+            "PyUtils is required to recover numeric HepMC weight names "
+            "from EVNT metadata"
+        ) from error
+
+    evnt_path = hepmc_path.parent / "EVNT.pool.root"
+
+    if not evnt_path.is_file():
+        raise AlignmentError(
+            f"EVNT file required for HepMC weight mapping is missing: {evnt_path}"
+        )
+
+    evnt_name = str(evnt_path)
+
+    try:
+        metadata_result = read_metadata(evnt_name, None, "full")
+        metadata = next(iter(metadata_result.values()))
+    except Exception as error:
+        raise AlignmentError(
+            f"could not read EVNT metadata from {evnt_path}"
+        ) from error
+
+    generation_metadata = (
+        metadata.get("/Generation/Parameters")
+        or metadata.get(b"/Generation/Parameters")
+    )
+
+    if not isinstance(generation_metadata, dict):
+        raise AlignmentError(
+            f"{evnt_path} does not contain /Generation/Parameters metadata"
+        )
+
+    weight_map = generation_metadata.get("HepMCWeightNames")
+
+    # In AthGeneration 23.6.41 MetaReader returns HepMCWeightNames
+    # as the string representation of a Python dictionary.
+    if isinstance(weight_map, str):
+        try:
+            weight_map = ast.literal_eval(weight_map)
+        except (ValueError, SyntaxError) as error:
+            raise AlignmentError(
+                "could not parse EVNT HepMCWeightNames metadata"
+            ) from error
+
+    if not isinstance(weight_map, dict):
+        raise AlignmentError(
+            f"{evnt_path} does not contain a valid HepMCWeightNames mapping"
+        )
+
+    try:
+        id_index = int(weight_map[MARKER_ID_WEIGHT])
+        unit_index = int(weight_map[MARKER_UNIT_WEIGHT])
+    except KeyError as error:
+        raise AlignmentError(
+            f"EVNT HepMCWeightNames is missing marker {error.args[0]}"
+        ) from error
+    except (TypeError, ValueError) as error:
+        raise AlignmentError(
+            "EVNT marker-weight indices are not integers"
+        ) from error
+
+    if id_index < 0 or unit_index < 0 or id_index == unit_index:
+        raise AlignmentError(
+            "EVNT contains invalid marker-weight indices"
+        )
+
+    return id_index, unit_index
 
 
 def main() -> int:

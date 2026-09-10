@@ -328,7 +328,7 @@ CARD_CHECKSUM="$(sha256sum "$CARD" | awk '{print $1}')"
 log "Building Delphes $DELPHES_VERSION"
 make -C "$DELPHES_ROOT" -j "$JOBS" \
   "CXX=$COMPILER_PATH" \
-  "RC=$ROOT_CONFIG_PATH" \
+  "RC=root-config" \
   "ROOTBUILD=$ROOT_BUILD_MODE"
 [[ -x "$DELPHES_ROOT/DelphesHepMC2" && -x "$DELPHES_ROOT/DelphesHepMC3" &&
     -s "$DELPHES_ROOT/libDelphes.so" ]] || {
