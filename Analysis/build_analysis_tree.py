@@ -2248,8 +2248,8 @@ def build_analysis_tree(
 
     schema = output_schema()
     event_count = 0
-    event_number_start: int | None = None
-    previous_event_number: int | None = None
+    event_number_start = expected_first_event
+    previous_delphes_event_number: int | None = None
     positive_weights = 0
     negative_weights = 0
     zero_weights = 0
@@ -2332,27 +2332,29 @@ def build_analysis_tree(
                                 "event-count mismatch: Delphes contains more events "
                                 f"than LHE (first excess Delphes entry {ordinal})"
                             ) from exc
+                        raw_delphes_event_number = _event_number(
+                            rows, local_event
+                        )
 
-                        number = _event_number(rows, local_event)
-                        if event_number_start is None:
-                            event_number_start = number
-                            if event_number_start != expected_first_event:
-                                raise MatchError(
-                                    "Delphes first Event.Number does not match generation "
-                                    f"metadata: tree={event_number_start}, "
-                                    f"generation={expected_first_event}"
-                                )
                         if (
-                            previous_event_number is not None
-                            and number <= previous_event_number
+                            previous_delphes_event_number is not None
+                            and raw_delphes_event_number
+                            <= previous_delphes_event_number
                         ):
                             raise MatchError(
                                 "Delphes Event.Number is not a strictly increasing "
-                                f"unique sequence: entry {ordinal} has {number}, "
-                                f"previous entry had {previous_event_number}"
+                                f"unique sequence: entry {ordinal} has "
+                                f"{raw_delphes_event_number}, previous entry had "
+                                f"{previous_delphes_event_number}"
                             )
 
-                        previous_event_number = number
+                        previous_delphes_event_number = raw_delphes_event_number
+
+                        # Delphes numbers are local to each independently
+                        # processed file. Convert them to the non-overlapping
+                        # campaign interval reserved by generation.first_event.
+                        campaign_event_number = expected_first_event + ordinal
+
                         if int(lhe_record["lhe_event_index"]) != ordinal:
                             raise RuntimeError(
                                 "LHE iterator did not preserve source ordinal"
@@ -2414,8 +2416,12 @@ def build_analysis_tree(
                             "job_id": np.uint32(job_id),
                             "event_uid_hi": np.uint64(uid_hi),
                             "event_uid_lo": np.uint64(uid_lo),
-                            "hepmc_event_number": np.int64(number),
-                            "delphes_event_number": np.int64(number),
+                            "hepmc_event_number": np.int64(
+                                campaign_event_number
+                            ),
+                            "delphes_event_number": np.int64(
+                                campaign_event_number
+                            ),
                             "hepmc_entry": np.uint64(ordinal),
                             "delphes_entry": np.uint64(ordinal),
                             "has_hepmc": True,
