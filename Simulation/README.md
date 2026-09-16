@@ -114,7 +114,8 @@ exact multiplicity postcondition was validated.
 Dedicated reconstructed collections begin from the dressed prompt leptons and
 apply, in order:
 
-1. the Delphes ATLAS-like momentum-resolution formula;
+1. the Run-2-inspired ECAL energy response below for electrons, and the
+   existing Delphes ATLAS-like momentum response for muons;
 2. a loose reconstruction-plus-identification efficiency;
 3. a separate loose prompt-lepton isolation efficiency.
 
@@ -147,9 +148,114 @@ Central efficiency anchors are:
 
 Efficiencies interpolate continuously between anchors and plateau above the
 last anchor. Small broad eta modifiers are included; there is no phi model.
-These are phenomenology-level Run-2 H4l proxies, not official Run-3 detector
-calibrations. The setup has no pileup, nonprompt/fake-lepton model, or charge
-misidentification.
+These are phenomenology-level Run-2 H4l proxies, not official detector
+calibrations. The setup has no overlaid pileup events, nonprompt/fake-lepton
+model, or charge misidentification. The electron response includes a fixed
+effective Run-2 pileup-noise contribution as described below.
+
+### Electron ECAL resolution
+
+The dedicated `RecoElectron` and `RecoElectronNoIso` collections use
+`H4lElectronECalSmearing`, model `atlas_run2_ecal_snc_v1`. It describes the
+**total calibrated electron energy response** of the electromagnetic
+calorimeter, with no track-energy combination. The former electron tracking
+resolution was inappropriate as the final energy measurement and produced
+excessive dielectron mass broadening, especially at high transverse momentum.
+Muon smearing, dressing, efficiencies, generic Delphes `Electron`/`Muon`
+diagnostic branches, and the fixed $Z_1=\mu^-\mu^+$, $Z_2=e^-e^+$ convention
+are unchanged.
+
+For dressed energy $E$ in GeV and dressed momentum pseudorapidity $\eta$, define
+$T=\max(E/\cosh\eta,1\;\mathrm{GeV})$. The relative response is
+
+$$
+r_e^2(E,\eta)=\left(\frac{\sigma_E}{E}\right)^2
+=\frac{S_T(\eta)^2}{T}
++\frac{N_{0,T}(\eta)^2+N_{\mathrm{PU},T}(\eta)^2}{T^2}
++C_{\mathrm{MC}}(\eta)^2+c_{\mathrm{data}}(\eta)^2.
+$$
+
+These are **effective coefficients expressed versus transverse energy**,
+not bare calorimeter sampling constants expressed versus $E$. They approximate
+material, clustering, noise, and calibration effects in the final electron
+response. $S_T$ has units $\sqrt{\mathrm{GeV}}$, the two noise terms have units
+GeV, and both constant terms are dimensionless fractions:
+
+| $\lvert\eta\rvert$ interval | $S_T$ | $N_{0,T}$ | $N_{\mathrm{PU},T}$ | $C_{\mathrm{MC}}$ | $c_{\mathrm{data}}$ |
+|---|---:|---:|---:|---:|---:|
+| $0\leq\lvert\eta\rvert\leq0.8$ | 0.09 | 0.30 | 0.55 | 0.004 | 0.007 |
+| $0.8<\lvert\eta\rvert\leq1.37$ | 0.12 | 0.84 | 0.55 | 0.004 | 0.009 |
+| $1.37<\lvert\eta\rvert\leq1.52$ | 0.15 | 1.20 | 0.70 | 0.010 | 0.025 |
+| $1.52<\lvert\eta\rvert\leq2.0$ | 0.10 | 0.55 | 0.60 | 0.004 | 0.015 |
+| $2.0<\lvert\eta\rvert<2.5$ | 0.08 | 0.50 | 0.60 | 0.004 | 0.017 |
+
+The coefficients are a reproducible phenomenological approximation, **not an
+official ATLAS parameter table or precision fit**. Their basis is:
+
+- The outer-barrel and outer-endcap baseline shapes, with $N_{\mathrm{PU},T}$
+  and $c_{\mathrm{data}}$ omitted, approximate the supercluster curves in
+  [ATLAS Run-2 electron performance, Fig. 7](https://arxiv.org/pdf/1908.00005#page=18).
+  At $E_T=35,55,150$ GeV, they give approximately $3.17,2.26,1.20$ percent
+  in the outer barrel and $2.01,1.47,0.84$ percent in the outer endcap.
+- The fixed $N_{\mathrm{PU},T}$ terms approximate the broad-bin increase in
+  response width between zero pileup and $30<\langle\mu\rangle<45$ in
+  [Fig. 8](https://arxiv.org/pdf/1908.00005#page=19), interpreted at a
+  representative $E_T=45$ GeV. That inclusive $25<E_T<100$ GeV plot does not
+  uniquely determine a noise coefficient at each energy. No event-by-event
+  pileup dependence is simulated.
+- The $c_{\mathrm{data}}$ terms outside the transition region represent the
+  typical additional smearing ranges in
+  [ATLAS full Run-2 energy calibration, Section 7](https://arxiv.org/html/2309.05471v2#S7):
+  below 1% in most of the barrel and 1--2% in the endcaps. They are added to
+  the baseline response in quadrature, not used as the total resolution.
+- The central-barrel and inner-endcap coefficients, the degraded transition
+  region, and extensions beyond the plotted eta/energy ranges are modelling
+  choices. The transition coefficient is not a measured ATLAS correction.
+  In particular, the 4--7 GeV buffer/acceptance region and $2.47<|\eta|<2.5$
+  should be treated as extrapolations. Broad eta bins introduce explicit
+  step boundaries and do not model local detector structures or phi effects.
+
+For orientation, the **total** per-electron resolutions predicted by this
+model are:
+
+| Region | $E_T=10$ GeV | $E_T=45$ GeV | $E_T=100$ GeV |
+|---|---:|---:|---:|
+| Central barrel | 6.93% | 2.09% | 1.36% |
+| Outer barrel | 10.78% | 3.02% | 1.85% |
+| Transition | 14.92% | 4.67% | 3.38% |
+| Inner endcap | 8.87% | 2.81% | 2.02% |
+| Outer endcap | 8.39% | 2.74% | 2.07% |
+
+The response is applied **once**, directly to dressed prompt electrons, before
+reco+ID and isolation. Both effective pileup noise and data correction are
+already included; do not add another calorimeter or data-smearing stage.
+`MomentumSmearing` remains the Delphes engine because it evaluates the
+momentum-vector eta and supports a positive, mean-preserving log-normal
+response. Its relative $p_T$ width is set to $r_e$, using
+$\sigma_{p_T}/p_T\simeq\sigma_E/E$ for relativistic electrons at fixed direction.
+Delphes keeps the dressed mass and direction fixed; finite dressed-mass
+effects in this relation are neglected. This is a core-resolution proxy,
+not a model of detailed bremsstrahlung tails. The 1 GeV transverse-energy
+floor only regularizes the formula below the existing 4 GeV response buffer;
+it is not a reconstruction acceptance cut.
+
+The resolved card records the model and all coefficients, and
+`simulation-metadata.txt` records `reco_electron_resolution_model` together
+with the existing card/builder checksums. **Existing Delphes files must be
+regenerated** to obtain the new response; changing analysis alone cannot fix
+their electron momenta. No new event generation or Delphes rebuild is needed.
+After updating the repository, rerun simulation on the saved HepMC input,
+then regenerate the analysis trees and any merged outputs. For example:
+
+```bash
+source Simulation/env.sh
+Simulation/run_simulation.sh /path/to/gg4l/job_000001 --overwrite
+```
+
+Without `--overwrite`, the existing checksum checks reject stale simulation
+outputs. For response validation, compare reco and dressed quantities on the
+same event set and account for the downstream $50<m_{ee}<106$ GeV selection,
+which truncates mass-response tails.
 
 The main output branches are:
 
@@ -246,8 +352,9 @@ simulation-output event counts to agree exactly.
 ## Tests
 
 The pure-Python tests verify the resolved card structure, direct-lepton origin
-policy, separate response stages, jet configuration, bounded efficiencies, and
-continuity at every pT knot:
+policy, separate response stages, ECAL resolution values and energy dependence,
+eta boundaries, jet configuration, bounded efficiencies, and continuity at
+every efficiency pT knot:
 
 ```bash
 uv run --frozen --extra test python -m pytest -q Simulation/tests
