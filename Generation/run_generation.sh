@@ -27,6 +27,7 @@ Options:
   --first-event N      First output event number (default: 1)
   --output-dir DIR     Run directory (default: Generation/runs/PROCESS_seedSEED)
   --release VERSION    AthGeneration version (default: 23.6.41)
+  --powheg-cores N     POWHEG workers for gridless integration (default: 1)
   --gridpack FILE      Reuse a compatible gridpack for the selected process
   --gridpack-metadata FILE
                        Manifest for --gridpack (default: FILE.metadata.json)
@@ -95,6 +96,7 @@ GRIDPACK=""
 GRIDPACK_METADATA=""
 NO_SETUP=0
 DRY_RUN=0
+POWHEG_CORES=1
 
 while (($#)); do
   case "$1" in
@@ -116,6 +118,10 @@ while (($#)); do
       ;;
     --release)
       ATHGEN_RELEASE="${2:?missing value for --release}"
+      shift 2
+      ;;
+    --powheg-cores)
+      POWHEG_CORES="${2:?missing value for --powheg-cores}"
       shift 2
       ;;
     --gridpack)
@@ -156,6 +162,10 @@ done
 }
 [[ "$FIRST_EVENT" =~ ^[1-9][0-9]{0,8}$ ]] || {
   echo "--first-event must be between 1 and 999999999" >&2
+  exit 2
+}
+[[ "$POWHEG_CORES" =~ ^[1-9][0-9]*$ ]] || {
+  echo "--powheg-cores must be a positive integer" >&2
   exit 2
 }
 if [[ -n "$GRIDPACK_METADATA" && -z "$GRIDPACK" ]]; then
@@ -223,7 +233,9 @@ TRANSFORM=(
 )
 
 if ((DRY_RUN)); then
-  printf 'ATHENA_CORE_NUMBER=1 PYTHONPATH=%q' "$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}"
+  printf 'ATHENA_CORE_NUMBER=%q PYTHONPATH=%q' \
+	 "$POWHEG_CORES" \
+	 "$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}"
   printf ' %q' "${TRANSFORM[@]}"
   printf '\n'
   exit 0
@@ -323,7 +335,7 @@ printf ' %q' "${TRANSFORM[@]}"
 printf '\n'
 (
   cd "$WORK_DIR"
-  env ATHENA_CORE_NUMBER=1 \
+  env ATHENA_CORE_NUMBER="$POWHEG_CORES" \
     PYTHONPATH="$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}" \
     "${TRANSFORM[@]}" 2>&1 | tee transform.stdout.log
 )

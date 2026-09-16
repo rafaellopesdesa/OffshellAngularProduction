@@ -85,6 +85,12 @@ while (($#)); do
       OUTPUT_DIR="$(realpath -m -- "$2")"
       shift 2
       ;;
+    --cores)
+      (($# >= 2)) || die_usage "missing value for --cores"
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] || die_usage "--cores must be a positive integer"
+      RUNNER_ARGS+=(--powheg-cores "$2")
+      shift 2
+      ;;
     --events|--seed|--first-event|--release)
       option="$1"
       (($# >= 2)) || die_usage "missing value for $option"
