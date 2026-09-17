@@ -29,6 +29,11 @@ Options forwarded to run_generation.sh:
   --seed N             Generator and shower random seed (default: 1)
   --first-event N      First output event number (default: 1)
   --release VERSION    AthGeneration version (default: 23.6.41)
+  --cores N            POWHEG workers for gridless integration (default: 1)
+  --ncall1 N           Override POWHEG stage-1 integration calls
+  --itmx1 N            Override POWHEG stage-1 integration iterations
+  --ncall2 N           Override POWHEG stage-2 integration calls
+  --itmx2 N            Override POWHEG stage-2 integration iterations
   --no-setup           Use an already configured AthGeneration environment
   -h, --help           Show this help
 
@@ -89,6 +94,30 @@ while (($#)); do
       (($# >= 2)) || die_usage "missing value for --cores"
       [[ "$2" =~ ^[1-9][0-9]*$ ]] || die_usage "--cores must be a positive integer"
       RUNNER_ARGS+=(--powheg-cores "$2")
+      shift 2
+      ;;
+    --ncall1)
+      (($# >= 2)) || die_usage "missing value for --ncall1"
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] || die_usage "--ncall1 must be a positive integer"
+      RUNNER_ARGS+=(--powheg-ncall1 "$2")
+      shift 2
+      ;;
+    --itmx1)
+      (($# >= 2)) || die_usage "missing value for --itmx1"
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] || die_usage "--itmx1 must be a positive integer"
+      RUNNER_ARGS+=(--powheg-itmx1 "$2")
+      shift 2
+      ;;
+    --ncall2)
+      (($# >= 2)) || die_usage "missing value for --ncall2"
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] || die_usage "--ncall2 must be a positive integer"
+      RUNNER_ARGS+=(--powheg-ncall2 "$2")
+      shift 2
+      ;;
+    --itmx2)
+      (($# >= 2)) || die_usage "missing value for --itmx2"
+      [[ "$2" =~ ^[1-9][0-9]*$ ]] || die_usage "--itmx2 must be a positive integer"
+      RUNNER_ARGS+=(--powheg-itmx2 "$2")
       shift 2
       ;;
     --events|--seed|--first-event|--release)

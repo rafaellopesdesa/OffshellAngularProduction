@@ -37,10 +37,13 @@ PowhegConfig.m4lmin = 150
 PowhegConfig.m4lmax = 3000
 
 # Integration settings retained from the validated PMG job option.
-PowhegConfig.ncall1 = 4000
-PowhegConfig.itmx1 = 2
-PowhegConfig.ncall2 = 3000
-PowhegConfig.itmx2 = 2
+import os
+
+PowhegConfig.ncall1 = int(os.environ.get("OAP_POWHEG_NCALL1", "4000"))
+PowhegConfig.itmx1 = int(os.environ.get("OAP_POWHEG_ITMX1", "2"))
+PowhegConfig.ncall2 = int(os.environ.get("OAP_POWHEG_NCALL2", "3000"))
+PowhegConfig.itmx2 = int(os.environ.get("OAP_POWHEG_ITMX2", "2"))
+
 PowhegConfig.foldcsi = 2
 PowhegConfig.foldy = 2
 PowhegConfig.foldphi = 5

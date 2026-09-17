@@ -28,6 +28,10 @@ Options:
   --output-dir DIR     Run directory (default: Generation/runs/PROCESS_seedSEED)
   --release VERSION    AthGeneration version (default: 23.6.41)
   --powheg-cores N     POWHEG workers for gridless integration (default: 1)
+  --powheg-ncall1 N    Override POWHEG stage-1 integration calls
+  --powheg-itmx1 N     Override POWHEG stage-1 integration iterations
+  --powheg-ncall2 N    Override POWHEG stage-2 integration calls
+  --powheg-itmx2 N     Override POWHEG stage-2 integration iterations
   --gridpack FILE      Reuse a compatible gridpack for the selected process
   --gridpack-metadata FILE
                        Manifest for --gridpack (default: FILE.metadata.json)
@@ -98,6 +102,11 @@ NO_SETUP=0
 DRY_RUN=0
 POWHEG_CORES=1
 
+POWHEG_NCALL1=""
+POWHEG_ITMX1=""
+POWHEG_NCALL2=""
+POWHEG_ITMX2=""
+
 while (($#)); do
   case "$1" in
     --events)
@@ -122,6 +131,22 @@ while (($#)); do
       ;;
     --powheg-cores)
       POWHEG_CORES="${2:?missing value for --powheg-cores}"
+      shift 2
+      ;;
+    --powheg-ncall1)
+      POWHEG_NCALL1="${2:?missing value for --powheg-ncall1}"
+      shift 2
+      ;;
+    --powheg-itmx1)
+      POWHEG_ITMX1="${2:?missing value for --powheg-itmx1}"
+      shift 2
+      ;;
+    --powheg-ncall2)
+      POWHEG_NCALL2="${2:?missing value for --powheg-ncall2}"
+      shift 2
+      ;;
+    --powheg-itmx2)
+      POWHEG_ITMX2="${2:?missing value for --powheg-itmx2}"
       shift 2
       ;;
     --gridpack)
@@ -168,6 +193,17 @@ done
   echo "--powheg-cores must be a positive integer" >&2
   exit 2
 }
+for value in \
+  "$POWHEG_NCALL1" \
+  "$POWHEG_ITMX1" \
+  "$POWHEG_NCALL2" \
+  "$POWHEG_ITMX2"
+do
+  [[ -z "$value" || "$value" =~ ^[1-9][0-9]*$ ]] || {
+    echo "POWHEG integration overrides must be positive integers" >&2
+    exit 2
+  }
+done
 if [[ -n "$GRIDPACK_METADATA" && -z "$GRIDPACK" ]]; then
   echo "--gridpack-metadata requires --gridpack" >&2
   exit 2
@@ -232,10 +268,26 @@ TRANSFORM=(
   "--outputTXTFile=LHE.TXT.tar.gz"
 )
 
+POWHEG_ENV=(
+  "ATHENA_CORE_NUMBER=$POWHEG_CORES"
+  "PYTHONPATH=$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}"
+)
+
+[[ -z "$POWHEG_NCALL1" ]] ||
+  POWHEG_ENV+=("OAP_POWHEG_NCALL1=$POWHEG_NCALL1")
+
+[[ -z "$POWHEG_ITMX1" ]] ||
+  POWHEG_ENV+=("OAP_POWHEG_ITMX1=$POWHEG_ITMX1")
+
+[[ -z "$POWHEG_NCALL2" ]] ||
+  POWHEG_ENV+=("OAP_POWHEG_NCALL2=$POWHEG_NCALL2")
+
+[[ -z "$POWHEG_ITMX2" ]] ||
+  POWHEG_ENV+=("OAP_POWHEG_ITMX2=$POWHEG_ITMX2")
+
 if ((DRY_RUN)); then
-  printf 'ATHENA_CORE_NUMBER=%q PYTHONPATH=%q' \
-	 "$POWHEG_CORES" \
-	 "$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}"
+  printf 'env'
+  printf ' %q' "${POWHEG_ENV[@]}"
   printf ' %q' "${TRANSFORM[@]}"
   printf '\n'
   exit 0
@@ -333,10 +385,10 @@ fi
 printf 'Running:'
 printf ' %q' "${TRANSFORM[@]}"
 printf '\n'
+
 (
   cd "$WORK_DIR"
-  env ATHENA_CORE_NUMBER="$POWHEG_CORES" \
-    PYTHONPATH="$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}" \
+  env "${POWHEG_ENV[@]}" \
     "${TRANSFORM[@]}" 2>&1 | tee transform.stdout.log
 )
 
