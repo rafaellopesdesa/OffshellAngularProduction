@@ -46,7 +46,7 @@ from offshell_production.harmonics import (  # noqa: E402
     truth_angular_factors,
 )
 
-MERGE_SCHEMA_VERSION = 1
+MERGE_SCHEMA_VERSION = 2
 EVENT_TREE_NAME = "Events"
 RUN_TREE_NAME = "Runs"
 LHE_WEIGHT_TREE_NAME = "LHEWeights"
@@ -55,6 +55,7 @@ ANALYSIS_METADATA_NAME = "analysis_metadata"
 MERGE_METADATA_NAME = "merge_metadata"
 NORMALIZATION_CONTRACT = "idwtup-minus4-sample-mean-v1"
 NOMINAL_WEIGHT_UNITS = "pb"
+RUN3_LUMINOSITY_PB_INVERSE = 312000.0
 EXPECTED_TRUTH_SLUGS = ("00_20", "20_20", "2m1_2p1", "2m2_2p2")
 
 
@@ -1168,6 +1169,8 @@ def _publish_output(temporary: Path, output: Path, overwrite: bool) -> None:
 def _output_event_schema() -> dict[str, np.dtype]:
     schema = dict(output_schema())
     schema["weight_nominal_pb"] = np.dtype("float64")
+    schema["lumi"] = np.dtype("float64")
+    schema["weight"] = np.dtype("float64")
     schema["truth_lhe_valid"] = np.dtype("bool")
     for slug in EXPECTED_TRUTH_SLUGS:
         schema[f"truth_h_{slug}"] = np.dtype("float64")
@@ -1378,6 +1381,8 @@ def _verify_temporary_output(
             *IDENTITY_BRANCHES,
             "weight_lhe",
             "weight_nominal_pb",
+            "lumi",
+            "weight",
             "truth_lhe_valid",
         ]
         for slug in EXPECTED_TRUTH_SLUGS:
@@ -1398,6 +1403,14 @@ def _verify_temporary_output(
             nominal_weight = np.asarray(
                 arrays["weight_nominal_pb"], dtype=np.float64
             )
+            lumi = np.asarray(arrays["lumi"], dtype=np.float64)
+            yield_weight = np.asarray(arrays["weight"], dtype=np.float64)
+            if not np.all(lumi == RUN3_LUMINOSITY_PB_INVERSE):
+                raise MergeError("temporary lumi does not match the Run 3 luminosity")
+            if not np.all(np.isfinite(yield_weight)) or not np.array_equal(
+                yield_weight, nominal_weight * lumi
+            ):
+                raise MergeError("temporary weight is not weight_nominal_pb times lumi")
             valid = np.asarray(arrays["truth_lhe_valid"], dtype=np.bool_)
             raw.add_array(raw_weight)
             nominal.add_array(nominal_weight)
@@ -1657,6 +1670,10 @@ def merge_analysis_outputs(
                         )
                         output_arrays = dict(arrays)
                         output_arrays["weight_nominal_pb"] = nominal_weight
+                        output_arrays["lumi"] = np.full(
+                            raw_weight.shape, RUN3_LUMINOSITY_PB_INVERSE, dtype=np.float64
+                        )
+                        output_arrays["weight"] = nominal_weight * output_arrays["lumi"]
                         output_arrays["truth_lhe_valid"] = valid
                         for slug in EXPECTED_TRUTH_SLUGS:
                             factor = np.asarray(factors[slug], dtype=np.float64)
@@ -1778,6 +1795,14 @@ def merge_analysis_outputs(
                         "max(1e-11*max(abs(target),1), "
                         "16*float64_eps*abs(scale)*retained_raw_sumabsw_pb)"
                     ),
+                },
+                "luminosity_weight": {
+                    "luminosity_branch": "lumi",
+                    "luminosity_pb_inverse": RUN3_LUMINOSITY_PB_INVERSE,
+                    "luminosity_units": "pb^-1",
+                    "output_branch": "weight",
+                    "weight_units": "expected events",
+                    "formula": "weight = weight_nominal_pb * lumi",
                 },
                 "truth_angular_weights": {
                     "angle_level": "LHE after independent Born projection",

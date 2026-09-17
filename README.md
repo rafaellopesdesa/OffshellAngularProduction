@@ -126,9 +126,14 @@ There is no upper RECO $m_{4\ell}$ cut.
 
 After producing several job outputs, `Merging/merge_analysis_outputs.py`
 combines them without changing the raw signed `weight_lhe` branch. It pools the
-generator normalization primitives, adds a directly histogrammable nominal
-weight whose sum is the filtered cross section, and evaluates the requested
-symmetric angular projectors from the Born-projected LHE helicity angles. See
+generator normalization primitives, adds `weight_nominal_pb` whose sum is the
+filtered cross section in pb, and evaluates the requested symmetric angular
+projectors from the Born-projected LHE helicity angles. Every merged event also
+stores `lumi = 312000` in $\mathrm{pb}^{-1}$, equivalent to the chosen Run 3
+normalization of $312\,\mathrm{fb}^{-1}$, and
+`weight = weight_nominal_pb * lumi` for expected-event histograms. The nominal
+and angular-component `_pb` branches retain their cross-section normalization;
+multiply `weight_truth_<slug>_pb` by `lumi` for an angular-component yield. See
 `Merging/README.md` for the merge command and exact branch definitions.
 
 ## Important qqZZ matching note

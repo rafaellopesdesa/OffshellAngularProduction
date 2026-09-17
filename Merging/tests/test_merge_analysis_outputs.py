@@ -87,6 +87,15 @@ def test_two_job_merge_pools_safety_stream_and_writes_truth_weights(
     np.testing.assert_array_equal(events["weight_lhe"], raw)
     np.testing.assert_allclose(events["weight_nominal_pb"], expected_nominal)
     assert math.fsum(events["weight_nominal_pb"]) == pytest.approx(0.4)
+    assert events["lumi"].dtype == np.dtype("float64")
+    assert events["weight"].dtype == np.dtype("float64")
+    np.testing.assert_array_equal(events["lumi"], np.full(len(raw), 312000.0))
+    np.testing.assert_allclose(events["weight"], expected_nominal * 312000.0)
+    # The 0.4 pb sample represents 124800 events at 312 fb^-1, retaining
+    # positive, negative, and zero contributions across both source jobs.
+    assert math.fsum(events["weight"]) == pytest.approx(124800.0)
+    np.testing.assert_array_equal(np.signbit(events["weight"]), np.signbit(raw))
+    assert events["weight"][2] == 0.0
     np.testing.assert_array_equal(np.signbit(events["weight_lhe"]), np.signbit(raw))
     assert events["weight_nominal_pb"][2] == 0.0
     assert _scalar(summary, "normalization_generated_lhe_events") == 10
@@ -142,6 +151,10 @@ def test_two_job_merge_pools_safety_stream_and_writes_truth_weights(
 
     assert metadata["normalization"]["values"]["effective_filtered_cross_section_pb"] == pytest.approx(0.4)
     assert metadata["merged_nominal_weight"]["raw_branch_immutable"] is True
+    assert metadata["schema_version"] == _scalar(summary, "schema_version") == 2
+    assert metadata["luminosity_weight"]["luminosity_pb_inverse"] == 312000.0
+    assert metadata["luminosity_weight"]["luminosity_units"] == "pb^-1"
+    assert metadata["luminosity_weight"]["formula"] == "weight = weight_nominal_pb * lumi"
     assert metadata["truth_angular_weights"]["angles"] == [
         "lhe_theta1",
         "lhe_phi1",

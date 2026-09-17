@@ -65,6 +65,33 @@ defines `weight_nominal_pb = c * weight_lhe`, so its sum closes exactly to the
 pooled filtered cross section. Positive and negative events always receive the
 same scale; no absolute value or sign-dependent normalization is used.
 
+## Luminosity and expected-event weights
+
+Every event in the merged `Events` tree also receives the following `float64`
+branches, using the chosen Run 3 normalization of $312\,\mathrm{fb}^{-1}$:
+
+| Branch | Value | Units |
+|---|---|---|
+| `lumi` | `312000` | $\mathrm{pb}^{-1}$ |
+| `weight` | `weight_nominal_pb * lumi` | Expected events |
+
+Thus $312000\,\mathrm{pb}^{-1}=312\,\mathrm{fb}^{-1}$, and summing `weight`
+over all merged events gives $\sigma_{\mathrm{filtered}}\,\mathcal L$, with
+$\sigma_{\mathrm{filtered}}$ in pb and $\mathcal L$ in $\mathrm{pb}^{-1}$.
+After an event selection, the sum gives the expected yield for that selection.
+Signed event weights are retained. Use `weight` directly for expected-event
+histograms; do not multiply it by the nominal weight or luminosity again.
+
+`weight_nominal_pb` and `weight_truth_<slug>_pb` remain cross-section weights
+in pb. For another luminosity, multiply those branches by the desired
+luminosity in $\mathrm{pb}^{-1}$.
+
+These branches are recorded in merge schema version 2. To update an existing
+merged file, rerun the merger on the original job-level analysis files, using
+`--overwrite` to replace the merged output. Generation, simulation, and analysis
+do not need to be rerun. Regenerate older campaign merges before passing them
+to the polarization-combination script, which requires the current merge schema.
+
 ## LHE truth angular weights
 
 The merger uses the already stored Born-projected LHE coordinates
@@ -104,6 +131,9 @@ The branch-safe component slugs are:
 Thus a coefficient in any kinematic bin is the sum of the corresponding
 `weight_truth_<slug>_pb` values over rows with `truth_lhe_valid=true`. There is
 no division by $S_{00;00}$. All four projectors are real algebraically.
+For the corresponding angular-component yield at the stored luminosity, use
+`lumi * weight_truth_<slug>_pb`, equivalently
+`weight * truth_factor_<slug>`, with the same validity mask.
 Invalid LHE projections remain in `Events`, with `truth_lhe_valid=false` and
 `NaN` truth fields. A usual sum-of-squared-event-weights uncertainty can be
 formed from these contributions; it does not include the separately reported
@@ -181,8 +211,9 @@ samples, and one direct incoherent mixed-polarization sample:
 | `weight_polcomb_20_20_pb` | Signed $(2,0;2,0)$ sample weight |
 | `weight_mixed_incoherent_pb` | Direct incoherent TL+LT sample weight |
 
-Every original event branch, including `weight_lhe`, `weight_nominal_pb`, and
-the direct `weight_truth_*_pb` projectors, is preserved unchanged. The new
+Every original event branch, including `weight_lhe`, `weight_nominal_pb`,
+`lumi`, `weight`, and the direct `weight_truth_*_pb` projectors, is preserved
+unchanged. The new
 weights are each source's already normalized `weight_nominal_pb` multiplied by
 the corresponding constant above; the signed results are never renormalized.
 For direct mixed-polarization use, `weight_mixed_incoherent_pb` preserves the
@@ -227,8 +258,8 @@ probe acceptance migration rather than the algebraic polarization identity.
 
 The merged file contains:
 
-- `Events`, with every original scalar branch plus the derived nominal and
-  truth-weight branches;
+- `Events`, with every original scalar branch plus `lumi`, the expected-event
+  `weight`, and the derived nominal and truth cross-section weight branches;
 - `Runs`, with the original row from every source job;
 - `MergeSummary`, with pooled normalization, raw/normalized sums, and counts;
 - `LHEWeights`, when every input has the same ordered alternative-weight

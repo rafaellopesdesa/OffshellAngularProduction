@@ -375,6 +375,8 @@ def test_composes_both_signed_samples_without_renormalizing_sources(
             events["weight_nominal_pb"][selected],
             source_events["weight_nominal_pb"],
         )
+        for name in ("lumi", "weight"):
+            np.testing.assert_array_equal(events[name][selected], source_events[name])
         np.testing.assert_array_equal(
             events["weight_truth_00_20_pb"][selected],
             source_events["weight_truth_00_20_pb"],
