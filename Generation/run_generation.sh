@@ -270,7 +270,6 @@ TRANSFORM=(
 
 POWHEG_ENV=(
   "ATHENA_CORE_NUMBER=$POWHEG_CORES"
-  "PYTHONPATH=$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}"
 )
 
 [[ -z "$POWHEG_NCALL1" ]] ||
@@ -388,6 +387,7 @@ printf '\n'
 
 (
   cd "$WORK_DIR"
+  PYTHONPATH="$SCRIPT_DIR/python${PYTHONPATH:+:$PYTHONPATH}" 
   env "${POWHEG_ENV[@]}" \
     "${TRANSFORM[@]}" 2>&1 | tee transform.stdout.log
 )
