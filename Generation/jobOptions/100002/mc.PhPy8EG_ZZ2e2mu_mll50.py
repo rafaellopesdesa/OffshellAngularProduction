@@ -20,6 +20,9 @@ evgenConfig.generators = ["Powheg", "Pythia8", "EvtGen"]
 # POWHEG ZZ setup starting from ATLAS defaults.
 # -----------------------------------------------------------------------------
 include("PowhegControl/PowhegControl_ZZ_Common.py")
+
+import os
+
 PowhegConfig.decay_mode = "z z > mu+ mu- e+ e-"
 PowhegConfig.withdamp = 1
 PowhegConfig.bornzerodamp = 1
@@ -38,6 +41,19 @@ PowhegConfig.mu_R = [1.0, 0.5, 1.0, 2.0, 0.5, 2.0, 0.5, 1.0, 2.0]
 # active pre-shower m4l filter is applied. Double that base LHE stream so the
 # requested HepMC event count has additional filtering headroom.
 PowhegConfig.nEvents *= 2.0
+
+if "OAP_POWHEG_NCALL1" in os.environ:
+    PowhegConfig.ncall1 = int(os.environ["OAP_POWHEG_NCALL1"])
+
+if "OAP_POWHEG_ITMX1" in os.environ:
+    PowhegConfig.itmx1 = int(os.environ["OAP_POWHEG_ITMX1"])
+
+if "OAP_POWHEG_NCALL2" in os.environ:
+    PowhegConfig.ncall2 = int(os.environ["OAP_POWHEG_NCALL2"])
+
+if "OAP_POWHEG_ITMX2" in os.environ:
+    PowhegConfig.itmx2 = int(os.environ["OAP_POWHEG_ITMX2"])
+
 PowhegConfig.generate()
 
 # POWHEG ZZ has no native m4l keywords. Apply the requested hard-event range
