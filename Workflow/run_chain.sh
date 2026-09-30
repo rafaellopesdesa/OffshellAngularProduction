@@ -13,7 +13,7 @@ Usage:
   Workflow/run_chain.sh PROCESS --events N --seed N --job-id N [options]
 
 PROCESS:
-  gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT
+  gg4l, gg4l_h, gg4l_b, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT
 
 Required options:
   --events N             Number of retained events
@@ -55,10 +55,10 @@ fi
 PROCESS="$1"
 shift
 case "$PROCESS" in
-  gg4l|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
+  gg4l|gg4l_h|gg4l_b|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
   qqzz) PROCESS=qqZZ ;;
   *)
-    echo "PROCESS must be gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
+    echo "PROCESS must be gg4l, gg4l_h, gg4l_b, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
     exit 2
     ;;
 esac

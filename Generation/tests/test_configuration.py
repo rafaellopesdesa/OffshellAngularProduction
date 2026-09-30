@@ -73,7 +73,7 @@ class GenerationConfigurationTest(unittest.TestCase):
 
         runner = (GENERATION_DIR / "run_generation.sh").read_text(encoding="utf-8")
         self.assertIn('"$SCRIPT_DIR/align_lhe_events.py"', runner)
-        self.assertEqual(runner.count("GENERATOR_M4L_MIN_GEV=150"), 2)
+        self.assertEqual(runner.count("GENERATOR_M4L_MIN_GEV=150"), 4)
         self.assertNotIn("GENERATOR_M4L_MIN_GEV=70", runner)
         for option in (
             "--lhe-contract-metadata",

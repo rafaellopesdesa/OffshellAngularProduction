@@ -12,8 +12,24 @@ import numpy as np
 import pytest
 import uproot
 
-from Analysis.build_analysis_tree import SCHEMA_VERSION, event_uid, output_schema
+from Analysis.build_analysis_tree import (
+    SAMPLE_CODES,
+    SCHEMA_VERSION,
+    event_uid,
+    output_schema,
+)
 from Merging.merge_analysis_outputs import BASE_RUN_SCHEMA, _weight_tree_schema
+
+RUN_NUMBERS = {
+    "gg4l": 100001,
+    "qqZZ": 100002,
+    "vpolar_LL": 100003,
+    "vpolar_TT": 100004,
+    "vpolar_TL": 100005,
+    "vpolar_LT": 100006,
+    "gg4l_h": 100007,
+    "gg4l_b": 100008,
+}
 
 
 @dataclass(frozen=True)
@@ -70,7 +86,7 @@ def _analysis_metadata(
     normalization: Normalization,
     alternative_ids: tuple[str, ...],
 ) -> dict[str, object]:
-    run_number = 100001 if sample == "gg4l" else 100002
+    run_number = RUN_NUMBERS[sample]
     filtered = normalization.sumw_accepted / normalization.generated
     inclusive = normalization.sumw_generated / normalization.generated
     return {
@@ -208,7 +224,7 @@ def write_job(
         raise ValueError("source IDs, weights, and angles must have equal lengths")
     if normalization.accepted < size:
         raise ValueError("the accepted safety stream must contain all retained events")
-    sample = "gg4l" if sample_code == 0 else "qqZZ"
+    sample = {code: name for name, code in SAMPLE_CODES.items()}[sample_code]
     schema = output_schema()
     events = _empty_arrays(schema, size)
     ordinal = np.arange(size, dtype=np.uint64)
@@ -284,7 +300,7 @@ def write_job(
         "source_event_id_max": max(source_ids),
         "generation_seed": job_id + 7,
         "delphes_seed": job_id + 17,
-        "run_number": 100001 if sample == "gg4l" else 100002,
+        "run_number": RUN_NUMBERS[sample],
         "athgeneration_release_major": 23,
         "athgeneration_release_minor": 6,
         "athgeneration_release_patch": 41,
@@ -419,11 +435,14 @@ def write_job(
 
 
 @pytest.fixture
-def two_job_inputs(tmp_path: Path) -> tuple[JobSpec, JobSpec]:
+def two_job_inputs(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> tuple[JobSpec, JobSpec]:
     """Two unequal jobs whose safety-stream and retained sums intentionally differ."""
 
     first = write_job(
         tmp_path / "job-a.root",
+        sample_code=getattr(request, "param", 0),
         job_id=11,
         source_ids=(101, 102, 103),
         weights=(2.0, -0.5, 0.0),
@@ -449,6 +468,7 @@ def two_job_inputs(tmp_path: Path) -> tuple[JobSpec, JobSpec]:
     )
     second = write_job(
         tmp_path / "job-b.root",
+        sample_code=getattr(request, "param", 0),
         job_id=12,
         source_ids=(201, 202),
         weights=(1.25, -0.25),

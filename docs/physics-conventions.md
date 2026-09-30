@@ -7,6 +7,13 @@ change here is a physics change and should be accompanied by a targeted test.
 
 - `gg4l` denotes the full POWHEG `gg4l` contribution: Higgs-mediated diagrams,
   continuum diagrams, and their interference (`contr = "full"`).
+- `gg4l_h` denotes the Higgs-mediated contribution of the same POWHEG
+  process (`contr = "only_h"`).
+- `gg4l_b` denotes its gluon-initiated continuum contribution
+  (`contr = "no_h"`). This is the background amplitude that interferes with
+  the Higgs in the full sample; this separate sample contains no such
+  interference term. The sum of `gg4l_h` and `gg4l_b` is $H+B$, whereas
+  `gg4l` remains $H+B+I$. No interference-only mode is exposed.
 - `qqZZ` denotes the POWHEG quark-initiated continuum process.
 - `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT` denote the four
   standalone VPolarized MadGraph components. Each retains the full
@@ -23,7 +30,7 @@ The generation phase spaces are:
 
 | sample | dilepton requirement | four-lepton range |
 |---|---:|---:|
-| `gg4l` | $50\leq m_{\ell\ell}\leq 200$ GeV | native POWHEG and LHE check: $150\leq m_{4\ell}\leq 3000$ GeV |
+| `gg4l`, `gg4l_h`, `gg4l_b` | $50\leq m_{\ell\ell}\leq 200$ GeV | native POWHEG and LHE check: $150\leq m_{4\ell}\leq 3000$ GeV |
 | `qqZZ` | $m_{\ell\ell}\geq 50$ GeV | pre-shower LHE filter: $150\leq m_{4\ell}\leq 3000$ GeV |
 | `vpolar_LL/TT/TL/LT` | $50\leq m_{\ell\ell}\leq 200$ GeV | native MadGraph and LHE check: $150\leq m_{4\ell}\leq 3000$ GeV |
 
@@ -192,8 +199,9 @@ The logical source identity is
 (campaign_id, sample_code, job_id, source_event_id)
 ```
 
-where `sample_code` is 0 for `gg4l`, 1 for `qqZZ`, and 10 through 13 for
-`vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`, respectively. A
+where `sample_code` is 0 for `gg4l`, 1 for `qqZZ`, 2 for `gg4l_h`, 3 for
+`gg4l_b`, and 10 through 13 for `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and
+`vpolar_LT`, respectively. A
 deterministic 128-bit digest is stored as two unsigned 64-bit words for
 convenient joining. Processing failures and unmatched events are fatal pipeline
 errors, not detector inefficiencies.

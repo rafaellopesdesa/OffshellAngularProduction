@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -97,6 +98,95 @@ def _run(
         env=merged_environment,
         check=False,
     )
+
+
+@pytest.mark.parametrize("process", ("gg4l", "gg4l_h", "gg4l_b"))
+def test_powheg_variants_complete_chain_with_process_and_provenance(
+    tmp_path: Path, process: str
+):
+    """Exercise real chain dispatch with lightweight stand-ins for heavy stages."""
+    runner = _workflow_fixture(tmp_path)
+    repository = runner.parents[1]
+    trace = tmp_path / "stages.jsonl"
+    common = (
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "args = sys.argv[1:]\n"
+        "def option(name):\n"
+        "    return args[args.index(name) + 1]\n"
+        "with open(os.environ['OAP_TEST_STAGE_TRACE'], 'a') as stream:\n"
+        "    stream.write(json.dumps([Path(__file__).name, args]) + '\\n')\n"
+    )
+    generation = repository / "Generation" / "run_generation.sh"
+    generation.write_text(
+        common
+        + "output = Path(option('--output-dir'))\n"
+        "output.mkdir()\n"
+        "(output / 'run-metadata.txt').write_text('process=' + args[0] + '\\n')\n"
+        "(output / 'lhe-contract-metadata.json').write_text('{}')\n",
+        encoding="utf-8",
+    )
+    simulation = repository / "Simulation" / "run_simulation.sh"
+    simulation.write_text(
+        common
+        + "if args[0] == '--preflight':\n"
+        "    raise SystemExit(0)\n"
+        "output = Path(args[0])\n"
+        "assert (output / 'run-metadata.txt').read_text().strip() == 'process=' + option('--process')\n"
+        "(output / 'events.matched.lhe.gz').write_bytes(b'LHE fixture')\n"
+        "(output / 'alignment-metadata.json').write_text('{}')\n"
+        "delphes = output / 'delphes_ATLAS'\n"
+        "delphes.mkdir()\n"
+        "(delphes / 'delphes.root').write_bytes(b'Delphes fixture')\n"
+        "(delphes / 'simulation-metadata.txt').write_text('process=' + option('--process'))\n",
+        encoding="utf-8",
+    )
+    analysis = repository / "Analysis" / "build_analysis_tree.py"
+    analysis.write_text(
+        common
+        + "assert all(Path(path).is_file() for path in args[:2])\n"
+        "assert Path(option('--generation-metadata')).read_text().strip() == 'process=' + option('--sample')\n"
+        "assert Path(option('--simulation-metadata')).read_text() == 'process=' + option('--sample')\n"
+        "assert Path(option('--lhe-contract-metadata')).is_file()\n"
+        "assert Path(option('--alignment-metadata')).is_file()\n"
+        "Path(option('--output')).write_bytes(b'ROOT fixture')\n",
+        encoding="utf-8",
+    )
+    gridpack = tmp_path / f"{process}_grids.tar.gz"
+    metadata = Path(f"{gridpack}.metadata.json")
+    gridpack.write_bytes(b'grid fixture')
+    metadata.write_text('{}', encoding="utf-8")
+    output = tmp_path / "stage"
+
+    result = _run(
+        runner, output,
+        "--gridpack", gridpack,
+        "--release", "23.6.41",
+        "--no-generation-setup",
+        "--campaign-id", 42,
+        process=process,
+        environment={"OAP_TEST_STAGE_TRACE": str(trace)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (output / "SUCCESS").is_file()
+    assert (output / "analysis.root").read_bytes() == b"ROOT fixture"
+    stages = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert [stage[0] for stage in stages] == [
+        "run_simulation.sh", "run_generation.sh",
+        "run_simulation.sh", "build_analysis_tree.py",
+    ]
+    assert stages[0][1] == ["--preflight", "--process", process]
+    generation_args = stages[1][1]
+    assert generation_args[0] == process
+    assert generation_args[generation_args.index("--gridpack") + 1] == str(gridpack)
+    assert generation_args[generation_args.index("--gridpack-metadata") + 1] == str(metadata)
+    assert "--no-setup" in generation_args
+    assert "--generator-prefix" not in generation_args
+    analysis_args = stages[3][1]
+    assert analysis_args[analysis_args.index("--sample") + 1] == process
+    assert analysis_args[analysis_args.index("--campaign-id") + 1] == "42"
 
 
 def test_external_analysis_parent_failure_precedes_stage_claim(tmp_path: Path):

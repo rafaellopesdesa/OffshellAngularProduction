@@ -176,7 +176,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gridpack", required=True, type=Path)
     parser.add_argument("--metadata", required=True, type=Path)
     parser.add_argument("--job-option", required=True, type=Path)
-    parser.add_argument("--process", required=True, choices=("gg4l", "qqZZ"))
+    parser.add_argument(
+        "--process", required=True, choices=("gg4l", "gg4l_h", "gg4l_b", "qqZZ")
+    )
     parser.add_argument("--run-number", required=True, type=int)
     parser.add_argument("--release", required=True)
     parser.add_argument("--ecm-energy-gev", required=True, type=int)

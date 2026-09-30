@@ -15,6 +15,8 @@ Usage:
 
 PROCESS:
   gg4l                 gg -> (H* + continuum + interference) -> 2e2mu
+  gg4l_h               gg -> H* -> 2e2mu (Higgs only)
+  gg4l_b               gg -> 2e2mu (continuum background only)
   qqZZ                 qq -> ZZ -> 2e2mu
   vpolar_LL            gg -> ZL(mu mu) ZL(e e) -> 2e2mu
   vpolar_TT            gg -> ZT(mu mu) ZT(e e) -> 2e2mu
@@ -73,10 +75,10 @@ case "$PROCESS" in
     }
     exec "$VPOLAR_BUILDER" "$PROCESS" "$@"
     ;;
-  gg4l|qqZZ)
+  gg4l|gg4l_h|gg4l_b|qqZZ)
     ;;
   *)
-    die_usage "PROCESS must be gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT"
+    die_usage "PROCESS must be gg4l, gg4l_h, gg4l_b, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT"
     ;;
 esac
 

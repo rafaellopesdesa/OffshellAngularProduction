@@ -23,7 +23,10 @@ from repository_snapshot import SnapshotError, inspect_repository  # noqa: E402
 
 
 SCHEMA_VERSION = 2
-PROCESSES = ("gg4l", "qqZZ", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT")
+PROCESSES = (
+    "gg4l", "gg4l_h", "gg4l_b", "qqZZ",
+    "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT",
+)
 VPOLAR_PROCESSES = frozenset({"vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"})
 MAX_JOB_ID = (1 << 32) - 1
 MAX_CAMPAIGN_ID = (1 << 64) - 1
@@ -41,6 +44,14 @@ POWHEG_GRIDPACK_CONFIG = {
     "gg4l": (
         100001,
         "mc.PhPy8_NNPDF30_gg4l_full_2e2mu_m4l150_3000.py",
+    ),
+    "gg4l_h": (
+        100007,
+        "mc.PhPy8_NNPDF30_gg4l_h_2e2mu_m4l150_3000.py",
+    ),
+    "gg4l_b": (
+        100008,
+        "mc.PhPy8_NNPDF30_gg4l_b_2e2mu_m4l150_3000.py",
     ),
     "qqZZ": (100002, "mc.PhPy8EG_ZZ2e2mu_mll50.py"),
 }

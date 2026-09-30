@@ -2,16 +2,18 @@
 
 This directory provides the first stage of the
 `Generation -> Simulation -> Analysis` chain on the UChicago Analysis
-Facility. `run_generation.sh` dispatches `gg4l` and `qqZZ` to the ATLAS
-`Gen_tf.py` stack, and `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`
+Facility. `run_generation.sh` dispatches `gg4l`, `gg4l_h`, `gg4l_b`, and
+`qqZZ` to the ATLAS `Gen_tf.py` stack, and `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`
 to the separately installed MadGraph/Pythia backend in `VPolar/`. Herwig is
 not used by either path.
 
-The two local-only run numbers are:
+The local-only run numbers are:
 
 | Process | Local run number | Matrix element and final state |
 |---|---:|---|
 | `gg4l` | 100001 | POWHEG-BOX-RES `gg -> (H* + continuum + interference) -> 2e2mu` |
+| `gg4l_h` | 100007 | POWHEG-BOX-RES `gg -> H* -> 2e2mu`, Higgs only (`only_h`) |
+| `gg4l_b` | 100008 | POWHEG-BOX-RES `gg -> 2e2mu`, continuum background only (`no_h`) |
 | `qqZZ` | 100002 | POWHEG `qq -> ZZ -> 2e2mu` |
 | `vpolar_LL` | 100003 | VPolar full loop-induced `gg -> ZL ZL -> 2e2mu` |
 | `vpolar_TT` | 100004 | VPolar full loop-induced `gg -> ZT ZT -> 2e2mu` |
@@ -19,7 +21,11 @@ The two local-only run numbers are:
 | `vpolar_LT` | 100006 | VPolar full loop-induced `gg -> ZL(mu mu) ZT(e e) -> 2e2mu` |
 
 These numbers are identifiers for local production, not registered ATLAS
-DSIDs.
+DSIDs. `gg4l` is unchanged. The two new modes use the same exclusive final
+state, mass cuts, 13.6 TeV collision energy, Pythia setup, output contract, and
+default 50 requested events as `gg4l`. The job options are
+`jobOptions/100007/mc.PhPy8_NNPDF30_gg4l_h_2e2mu_m4l150_3000.py` and
+`jobOptions/100008/mc.PhPy8_NNPDF30_gg4l_b_2e2mu_m4l150_3000.py`.
 
 The VPolar rows are exclusive `e+ e- mu+ mu-` and retain Higgs, continuum-box,
 and Higgs/box interference diagrams. See `VPolar/README.md` for the one-time
@@ -105,6 +111,27 @@ number, AthGeneration release, and 13600 GeV beam configuration before
 reporting success. The pilot's event products and logs remain beside the pack
 for physics and generator-diagnostic review.
 
+Prepare the two separate contributions with the same interface:
+
+```bash
+./prepare_gridpack.sh gg4l_h --events 50 --seed 1701 \
+  --output-dir /data/$USER/offshell/gridpacks/gg4l_h
+./prepare_gridpack.sh gg4l_b --events 50 --seed 1801 \
+  --output-dir /data/$USER/offshell/gridpacks/gg4l_b
+```
+
+`gg4l`, `gg4l_h`, and `gg4l_b` each require their own integration grids.
+Changing the contribution changes the integrand; cross-mode gridpack reuse is
+rejected by the process, job-option, and run-number checks.
+
+For gridless integration, `prepare_gridpack.sh` accepts `--cores`, `--ncall1`,
+`--itmx1`, `--ncall2`, and `--itmx2`. The corresponding direct-run options are
+`run_generation.sh --powheg-cores`, `--powheg-ncall1`, `--powheg-itmx1`,
+`--powheg-ncall2`, and `--powheg-itmx2`. The default worker count is one.
+POWHEG divides the call budget among workers, so choose adequate integration
+statistics for the allocated cores and check convergence before production.
+These controls apply to all three gg4l modes.
+
 After validating the pilot, use the archive for every subsequent job:
 
 ```bash
@@ -147,8 +174,9 @@ directory contains:
 | `integration_grids.tar.gz.metadata.json` | Physics/release/beam-energy fingerprint required for grid reuse |
 
 The simulation runner can consume `events.hepmc` directly. Its adjacent
-`run-metadata.txt` records `process=gg4l|qqZZ` and `seed=...` so the next stage
-does not have to infer either from the filename.
+`run-metadata.txt` records the selected `process` (`gg4l`, `gg4l_h`,
+`gg4l_b`, or `qqZZ`) and `seed=...` so the next stage does not have to infer
+either from the filename.
 
 Generated run directories are intentionally not committed.
 
@@ -206,8 +234,14 @@ PowhegConfig.m4lmax = 3000
 ```
 
 `full` includes the Higgs-mediated amplitude, continuum amplitude, and their
-interference. The explicit 11/13 modes request the only directly supported
-exclusive gg4l ZZ decay, 2e2mu. Leaving the source card's `ll`/`ll` values
+interference. `gg4l_h` changes `contr` to `"only_h"`; `gg4l_b` changes it to
+`"no_h"`, the PowhegControl spelling for continuum background only. The
+background sample contains the continuum contribution that interferes with
+the Higgs in the full sample, but no interference term itself. Consequently,
+adding the `gg4l_h` and `gg4l_b` cross sections does not recover `gg4l`: the
+Higgs/continuum interference is present only in the full mode. No
+interference-only mode is exposed. The explicit 11/13 modes request the only
+directly supported exclusive gg4l ZZ decay, 2e2mu. Leaving the source card's `ll`/`ll` values
 would invoke the `gg4l_emu2all` LHE postprocessor and create an inclusive 4l
 sample. The remaining integration, scale, PDF, and Pythia settings are retained
 from the PMG card. See the
@@ -258,11 +292,12 @@ HepMC/Delphes cross-section fields are retained as diagnostics only.
 
 Do **not** reuse the GRID tarball distributed with DSID 602686. Besides pointing
 to a CERN EOS location that may not be readable at UChicago, it was integrated
-for `contr=no_h`, inclusive flavours, `mllmin=10`, and `m4lmin=70`. All four
-settings change here, so its grids and upper bounds are invalid.
+for `contr=no_h`, inclusive flavours, `mllmin=10`, and `m4lmin=70`. Its
+flavours and mass cuts differ from every local mode, and the contribution also
+differs for `gg4l` and `gg4l_h`, so its grids and upper bounds are invalid.
 
 The dedicated `prepare_gridpack.sh` workflow above is the supported bootstrap
-for both `gg4l` and `qqZZ`. It converts PowhegControl's generated
+for `gg4l`, `gg4l_h`, `gg4l_b`, and `qqZZ`. It converts PowhegControl's generated
 `integration_grids.tar.gz` into a checked production input by requiring and
 validating the adjacent repository manifest. This is an integration-grid and
 upper-bound archive, not a self-contained executable: every consuming job
@@ -273,7 +308,9 @@ Although the job option retains `manyseeds=1` and `parallelstage=4`, this does
 not require prebuilt grids. PowhegControl's RES multicore scheduler checks for
 each stage's grid files and rewrites `parallelstage` to 1, 2, 3, and 4 in turn;
 when no gridpack is present, the missing-file checks cause every required stage
-to run. `ATHENA_CORE_NUMBER=1` still uses this staged scheduler with one worker.
+to run. The default `ATHENA_CORE_NUMBER=1` still uses this staged scheduler
+with one worker; `--powheg-cores` selects more workers for a direct gridless run, or
+`--cores` when preparing the gridpack.
 
 The default manifest path is `GRIDPACK.metadata.json`; use
 `--gridpack-metadata FILE` only if the two files were deliberately renamed or
@@ -301,6 +338,6 @@ bash -n Generation/*.sh
 ```
 
 They exercise exact named-weight matching with source-ID gaps, LHE truncation,
-phase-space filtering and efficiency metadata, count/contract validation, both
-physics-card settings, gridpack compatibility, and the release-specific HepMC
-transform argument.
+phase-space filtering and efficiency metadata, count/contract validation,
+physics-card settings for all POWHEG modes, gridpack compatibility, and the
+release-specific HepMC transform argument.

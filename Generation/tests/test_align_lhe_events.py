@@ -356,6 +356,27 @@ class NamedWeightAlignmentTest(unittest.TestCase):
         self.assertNotIn("generation_config", metadata["files"])
         self.assertNotIn("shower_log", metadata["files"])
 
+    def test_gg4l_components_preserve_process_in_aligned_outputs(self) -> None:
+        for process, run_number in (("gg4l_h", 100007), ("gg4l_b", 100008)):
+            with self.subTest(process=process):
+                self.output.unlink(missing_ok=True)
+                self.metadata.unlink(missing_ok=True)
+                payload = json.loads(self.lhe_contract.read_text(encoding="utf-8"))
+                payload["process"] = process
+                self.lhe_contract.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+                command = self.command()
+                command[command.index("--process") + 1] = process
+                command[command.index("--run-number") + 1] = str(run_number)
+                result = subprocess.run(command, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                metadata = json.loads(self.metadata.read_text(encoding="utf-8"))
+                self.assertEqual(metadata["process"], process)
+                self.assertEqual(metadata["run_number"], run_number)
+                self.assertEqual(metadata["counts"]["matched_lhe_events"], 5)
+                self.assertEqual(
+                    metadata["phase_space_filter"]["filtered_cross_section_pb"], 0.375
+                )
+
     def test_standalone_backend_uses_backend_neutral_provenance(self) -> None:
         result = subprocess.run(
             self.standalone_command(), text=True, capture_output=True
@@ -472,7 +493,7 @@ class NamedWeightAlignmentTest(unittest.TestCase):
         )
         result = subprocess.run(self.command(), text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("missing named marker", result.stderr.lower())
+        self.assertIn("weight names contain neither", result.stderr.lower())
 
     def test_rejects_wrong_hepmc_count(self) -> None:
         self.hepmc.write_text(hepmc_document(SHOWERED_IDS[:-1]), encoding="utf-8")

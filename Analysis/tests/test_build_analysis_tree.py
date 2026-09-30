@@ -212,6 +212,8 @@ def _write_provenance(
     run_numbers = {
         "gg4l": 100001,
         "qqZZ": 100002,
+        "gg4l_h": 100007,
+        "gg4l_b": 100008,
         "vpolar_LL": 100003,
         "vpolar_TT": 100004,
         "vpolar_TL": 100005,
@@ -610,19 +612,30 @@ def test_event_uid_is_stable_and_uses_complete_logical_key():
     assert nominal != event_uid(42, SAMPLE_CODES["gg4l"], 7, 10)
 
 
-def test_vpolar_sample_codes_are_permanent_and_distinct():
+def test_sample_codes_are_permanent_and_produce_distinct_event_uids():
     assert SAMPLE_CODES == {
         "gg4l": 0,
         "qqZZ": 1,
+        "gg4l_h": 2,
+        "gg4l_b": 3,
         "vpolar_LL": 10,
         "vpolar_TT": 11,
         "vpolar_TL": 12,
         "vpolar_LT": 13,
     }
+    assert len({event_uid(42, code, 7, 9) for code in SAMPLE_CODES.values()}) == len(
+        SAMPLE_CODES
+    )
 
 
+@pytest.mark.parametrize(
+    ("sample", "run_number"),
+    (("gg4l", 100001), ("gg4l_h", 100007), ("gg4l_b", 100008)),
+)
 def test_writes_one_row_per_lhe_and_retains_negative_unreconstructed_event(
     tmp_path: Path,
+    sample: str,
+    run_number: int,
 ):
     lhe = tmp_path / "events.lhe"
     delphes = tmp_path / "delphes.root"
@@ -635,13 +648,13 @@ def test_writes_one_row_per_lhe_and_retains_negative_unreconstructed_event(
         cross_sections=(-0.25, 0.30),
         cross_section_errors=(-0.01, 0.015),
     )
-    metadata = _write_provenance(tmp_path, lhe, delphes, process="gg4l")
+    metadata = _write_provenance(tmp_path, lhe, delphes, process=sample)
 
     summary = build_analysis_tree(
         lhe,
         delphes,
         output,
-        sample="gg4l",
+        sample=sample,
         job_id=17,
         campaign_id=20260902,
         step_size="1 kB",
@@ -661,6 +674,15 @@ def test_writes_one_row_per_lhe_and_retains_negative_unreconstructed_event(
         embedded = json.loads(str(root_file["analysis_metadata"]))
 
     np.testing.assert_array_equal(events["lhe_event_index"], [0, 1])
+    np.testing.assert_array_equal(events["sample_code"], [SAMPLE_CODES[sample]] * 2)
+    assert runs["run_number"][0] == run_number
+    assert runs["sample_code"][0] == SAMPLE_CODES[sample]
+    assert embedded["sample"] == sample
+    for stage in ("generation", "lhe_contract", "alignment", "simulation"):
+        assert embedded["provenance"][stage]["process"] == sample
+    assert embedded["provenance"]["generation"]["generator_backend"] == (
+        "athgeneration"
+    )
     np.testing.assert_array_equal(events["source_event_id"], [2, 7])
     np.testing.assert_array_equal(events["delphes_event_number"], [1, 2])
     np.testing.assert_allclose(events["weight_lhe"], [-2.5, 1.5])
@@ -1122,7 +1144,9 @@ def test_overwrite_replaces_existing_output_atomically(tmp_path: Path):
     assert not list(tmp_path.glob(".analysis.root.partial.*"))
 
 
-def test_event_number_gap_fails_before_ordinal_join(tmp_path: Path):
+def test_gapped_delphes_numbers_are_renumbered_after_source_id_matching(
+    tmp_path: Path,
+):
     lhe = tmp_path / "events.lhe"
     delphes = tmp_path / "delphes.root"
     output = tmp_path / "analysis.root"
@@ -1130,7 +1154,34 @@ def test_event_number_gap_fails_before_ordinal_join(tmp_path: Path):
     _write_delphes(delphes, (1, 3))
     metadata = _write_provenance(tmp_path, lhe, delphes, process="gg4l")
 
-    with pytest.raises(MatchError, match="not a unique contiguous"):
+    build_analysis_tree(
+        lhe,
+        delphes,
+        output,
+        sample="gg4l",
+        job_id=2,
+        campaign_id=5,
+        **metadata,
+    )
+    with uproot.open(output) as root_file:
+        events = root_file["Events"].arrays(library="np")
+    np.testing.assert_array_equal(events["source_event_id"], [2, 7])
+    np.testing.assert_array_equal(events["delphes_event_number"], [1, 2])
+    np.testing.assert_array_equal(events["hepmc_event_number"], [1, 2])
+
+
+@pytest.mark.parametrize("event_numbers", [(1, 1), (2, 1)])
+def test_rejects_duplicate_or_decreasing_delphes_numbers(
+    tmp_path: Path, event_numbers: tuple[int, ...]
+):
+    lhe = tmp_path / "events.lhe"
+    delphes = tmp_path / "delphes.root"
+    output = tmp_path / "analysis.root"
+    _write_lhe(lhe)
+    _write_delphes(delphes, event_numbers)
+    metadata = _write_provenance(tmp_path, lhe, delphes, process="gg4l")
+
+    with pytest.raises(MatchError, match="not a strictly increasing unique sequence"):
         build_analysis_tree(
             lhe,
             delphes,

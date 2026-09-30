@@ -56,6 +56,7 @@ def _replace_seed_in_run_and_metadata(path: Path, name: str, value: int) -> None
     _replace_analysis_metadata(path, metadata)
 
 
+@pytest.mark.parametrize("two_job_inputs", [0, 2, 3], indirect=True)
 def test_two_job_merge_pools_safety_stream_and_writes_truth_weights(
     tmp_path: Path,
     two_job_inputs: tuple[JobSpec, JobSpec],
@@ -161,6 +162,15 @@ def test_two_job_merge_pools_safety_stream_and_writes_truth_weights(
         "lhe_theta2",
         "lhe_phi2",
     ]
+    sample_code = int(events["sample_code"][0])
+    sample = {0: "gg4l", 2: "gg4l_h", 3: "gg4l_b"}[sample_code]
+    assert metadata["sample"] == sample
+    assert metadata["sample_code"] == sample_code
+    for source in metadata["inputs"]:
+        analysis_metadata = source["analysis_metadata"]
+        assert analysis_metadata["sample"] == sample
+        for stage in ("generation", "lhe_contract", "alignment", "simulation"):
+            assert analysis_metadata["provenance"][stage]["process"] == sample
 
 
 @pytest.mark.parametrize(
@@ -196,7 +206,8 @@ def test_rejects_duplicate_source_job_even_with_different_source_ids(
         merge_analysis_outputs([first.path, second.path], tmp_path / "merged.root")
 
 
-def test_rejects_mixed_samples(tmp_path: Path):
+@pytest.mark.parametrize("sample_codes", [(0, 1), (0, 2), (0, 3), (2, 3)])
+def test_rejects_mixed_samples(tmp_path: Path, sample_codes: tuple[int, int]):
     normalization = Normalization(4, 2, 2.0, 3.0, 3.0, 1.0, 2.0, 2.0)
     first = write_job(
         tmp_path / "gg.root",
@@ -205,6 +216,7 @@ def test_rejects_mixed_samples(tmp_path: Path):
         weights=(1.25, -0.25),
         angles=((0.4, 0.1, 0.8, -0.2), (0.5, 0.2, 0.9, -0.3)),
         normalization=normalization,
+        sample_code=sample_codes[0],
     )
     second = write_job(
         tmp_path / "qq.root",
@@ -213,7 +225,7 @@ def test_rejects_mixed_samples(tmp_path: Path):
         weights=(1.25, -0.25),
         angles=((0.4, 0.1, 0.8, -0.2), (0.5, 0.2, 0.9, -0.3)),
         normalization=normalization,
-        sample_code=1,
+        sample_code=sample_codes[1],
     )
 
     with pytest.raises(ProvenanceError, match="one campaign and sample"):

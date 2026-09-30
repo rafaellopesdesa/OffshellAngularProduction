@@ -213,7 +213,7 @@ class PrepareDressedCardTest(unittest.TestCase):
                     "set RequireDirectHardProcessCandidate false", result
                 )
 
-        for process in ("auto", "gg4l", "qqZZ"):
+        for process in ("auto", "gg4l", "gg4l_h", "gg4l_b", "qqZZ"):
             with self.subTest(process=process):
                 result = prepare_card(CARD, process=process)
                 self.assertIn("set RequireBosonAncestorCandidate true", result)
@@ -221,6 +221,12 @@ class PrepareDressedCardTest(unittest.TestCase):
                 self.assertNotIn(
                     "set RequireDirectHardProcessCandidate true", result
                 )
+
+    def test_gg4l_components_use_the_full_process_detector_response(self):
+        full_card = prepare_card(CARD, process="gg4l")
+        for process in ("gg4l_h", "gg4l_b"):
+            with self.subTest(process=process):
+                self.assertEqual(prepare_card(CARD, process=process), full_card)
 
     def test_rejects_process_names_outside_the_closed_backend_set(self):
         with self.assertRaisesRegex(ValueError, "unsupported process"):

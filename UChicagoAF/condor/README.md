@@ -1,9 +1,10 @@
 # UChicago AF HTCondor campaigns
 
 This directory is the batch layer for the common
-`Generation -> Simulation -> Analysis` interface. It supports the two ATLAS
-generators (`gg4l`, `qqZZ`) and the four exclusive VPolarized modes
-(`vpolar_LL`, `vpolar_TT`, `vpolar_TL`, `vpolar_LT`). Every worker processes
+`Generation -> Simulation -> Analysis` interface. It supports the four ATLAS
+process modes (`gg4l`, `gg4l_h`, `gg4l_b`, `qqZZ`) and the four exclusive
+VPolarized modes (`vpolar_LL`, `vpolar_TT`, `vpolar_TL`, `vpolar_LT`). Every
+worker processes
 only the `e+e-mu+mu-` final state selected by the underlying generation card.
 
 ## Prepare a campaign
@@ -31,6 +32,13 @@ python UChicagoAF/condor/submit_campaign.py gg4l \
   --gridpack /data/$USER/offshell/gridpacks/gg4l/integration_grids.tar.gz \
   --output-root /data/$USER/offshell/production
 ```
+
+To submit Higgs-only or gluon-continuum-only production, use `gg4l_h` or
+`gg4l_b` in both the preparation and submission commands and their gridpack
+paths. Prepare a separate campaign and compatible gridpack for each process;
+the full `gg4l` gridpack cannot be used for either separate contribution.
+Outputs remain under `OUTPUT_ROOT/PROCESS`, retaining the distinct sample
+identity through simulation, analysis, and merging.
 
 The default manifest is the adjacent `GRIDPACK.metadata.json`. Pass
 `--gridpack-metadata FILE` only if the pair was deliberately renamed or moved

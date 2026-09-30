@@ -12,8 +12,8 @@ Before running it:
    environment that will run simulation; and
 3. run from a UChicago AF shell/container with ATLAS CVMFS available.
 
-The ATLAS environment in step 3 is required for `gg4l` and `qqZZ`. VPolar
-processes instead require the shared prefix built by
+The ATLAS environment in step 3 is required for `gg4l`, `gg4l_h`, `gg4l_b`,
+and `qqZZ`. VPolar processes instead require the shared prefix built by
 `Generation/VPolar/install_vpolar.sh`.
 
 Example smoke jobs from the repository root:
@@ -28,6 +28,11 @@ Workflow/run_chain.sh qqZZ \
   --output-dir /data/$USER/offshell/smoke/qqZZ_job0
 ```
 
+For Higgs-only or gluon-continuum-only samples, replace `gg4l` with `gg4l_h`
+or `gg4l_b`, including in the output path. Both use the same full chain,
+selection, matching checks, and compact output schema. Their separate sample
+codes preserve the process identity through analysis and merging.
+
 The polarized interface is identical apart from the installation prefix:
 
 ```bash
@@ -39,8 +44,8 @@ Workflow/run_chain.sh vpolar_TT \
 
 These gridless commands are intended for one-job smoke tests. Before normal
 production, use `Generation/prepare_gridpack.sh` to build a separate compatible
-pack for `gg4l`, `qqZZ`, or each VPolar polarization, then pass it through the
-same workflow interface:
+pack for each of `gg4l`, `gg4l_h`, `gg4l_b`, `qqZZ`, or each VPolar
+polarization, then pass it through the same workflow interface:
 
 ```bash
 Workflow/run_chain.sh vpolar_TT \
@@ -92,6 +97,11 @@ uv run python Merging/merge_analysis_outputs.py \
   --output /data/$USER/offshell/merged/gg4l.root \
   /data/$USER/offshell/production/gg4l/campaign_20260902/job_*/analysis.root
 ```
+
+For `gg4l_h` or `gg4l_b`, substitute that name in both paths and merge each
+contribution separately; a mixed-process input list is rejected. Each sample
+gets its own cross-section normalization, truth angular weights, and the
+`lumi = 312000` / `weight = weight_nominal_pb * lumi` branches.
 
 The merger pools the pre-shower normalization primitives rather than averaging
 the per-job cross sections. It preserves the raw signed LHE weight, adds a

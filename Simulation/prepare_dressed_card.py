@@ -14,6 +14,8 @@ from pathlib import Path
 SUPPORTED_PROCESSES = (
     "auto",
     "gg4l",
+    "gg4l_h",
+    "gg4l_b",
     "qqZZ",
     "vpolar_LL",
     "vpolar_TT",

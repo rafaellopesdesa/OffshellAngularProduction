@@ -56,6 +56,8 @@ UID_SCHEMA_TAG = b"OffshellAngularProduction.Events.v2\0"
 SAMPLE_CODES = {
     "gg4l": 0,
     "qqZZ": 1,
+    "gg4l_h": 2,
+    "gg4l_b": 3,
     "vpolar_LL": 10,
     "vpolar_TT": 11,
     "vpolar_TL": 12,

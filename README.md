@@ -27,8 +27,18 @@ The production modes are:
 | Sample | Hard process | Generation phase space |
 |---|---|---|
 | `gg4l` | full Higgs + continuum + interference, exclusive `2e2mu` | $50\leq m_{\ell\ell}\leq200$ GeV, $150\leq m_{4\ell}\leq3000$ GeV |
+| `gg4l_h` | Higgs-mediated contribution only, exclusive `2e2mu` | $50\leq m_{\ell\ell}\leq200$ GeV, $150\leq m_{4\ell}\leq3000$ GeV |
+| `gg4l_b` | gluon-initiated continuum contribution only, exclusive `2e2mu` | $50\leq m_{\ell\ell}\leq200$ GeV, $150\leq m_{4\ell}\leq3000$ GeV |
 | `qqZZ` | quark-initiated continuum, exclusive `2e2mu` | $m_{\ell\ell}\geq50$ GeV, $150\leq m_{4\ell}\leq3000$ GeV at LHE level |
 | `vpolar_LL/TT/TL/LT` | full loop-induced Higgs + continuum + interference in a fixed polarization channel, exclusive `2e2mu` | $50\leq m_{\ell\ell}\leq200$ GeV, $150\leq m_{4\ell}\leq3000$ GeV |
+
+`gg4l` keeps its original name and full contribution. The new `gg4l_h` and
+`gg4l_b` samples use POWHEG `contr="only_h"` and `contr="no_h"`, respectively.
+The latter is the continuum background that interferes with the Higgs
+amplitude in the full sample; it contains no Higgs/continuum interference
+term itself. Thus $\sigma_{\texttt{gg4l}}=\sigma_H+\sigma_B+\sigma_I$,
+while the sum of the two separate samples contains only $H+B$. No
+interference-only production mode is provided.
 
 Every generation configuration requests the exclusive `2e2mu` state and uses
 Pythia8. Herwig is not part of the chain.
@@ -76,6 +86,12 @@ Workflow/run_chain.sh gg4l \
   --output-dir /data/$USER/offshell/smoke/gg4l_job0
 ```
 
+The same commands support `gg4l_h` and `gg4l_b`: replace `gg4l` in the
+process argument and output/gridpack paths. Build and validate a separate
+gridpack for each contribution; packs cannot be shared between these modes.
+Each has the complete generation, simulation, analysis, HTCondor, and merge
+chain, with the same cuts and output schema as `gg4l`.
+
 For polarized samples, build the shared generator stack once and then prepare
 an independent native MadGraph gridpack for each required polarization:
 
@@ -108,8 +124,8 @@ remains available for smoke tests and diagnosis.
 
 Each stage also has a standalone runner and detailed README. The default
 generation release is `AthGeneration 23.6.41`; its transform writes EVNT,
-HepMC, and the POWHEG LHE sidecar. Before Pythia, both job options enforce their
-LHE-level four-lepton range and add the technical weights
+HepMC, and the POWHEG LHE sidecar. Before Pythia, all POWHEG job options enforce
+their LHE-level four-lepton range and add the technical weights
 `AUX_OAP_EVENT_ID` and `AUX_OAP_EVENT_UNIT`. `Generation/align_lhe_events.py`
 recovers the exact source ID from their HepMC ratio and publishes
 `events.matched.lhe.gz` with exactly the showered events in HepMC order. Source
@@ -162,7 +178,7 @@ above. The repository-local `Generation/runs/...` and `Workflow/runs/...`
 defaults are intended only for smoke tests and other small jobs.
 
 After local smoke tests, `UChicagoAF/condor/submit_campaign.py` prepares
-deterministic shared-filesystem HTCondor campaigns. It supports all six sample
+deterministic shared-filesystem HTCondor campaigns. It supports all eight sample
 names, gives jobs disjoint seeds and event-number ranges, requires a compatible
 gridpack whenever `--jobs` is greater than one, and requires the shared VPolar
 prefix for polarized modes. See `UChicagoAF/condor/README.md`.

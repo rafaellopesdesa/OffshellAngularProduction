@@ -70,6 +70,12 @@ the wrapper:
   Generation/run_generation.sh gg4l --events 2 --seed 101
 ```
 
+The same ATLAS payload supports `gg4l_h` (Higgs only), `gg4l_b`
+(gluon-initiated continuum only), and `qqZZ`. Each follows the same runtime
+setup as `gg4l`; use separate output directories and process-specific
+gridpacks. The full-chain and campaign commands are documented in
+`Workflow/README.md` and `condor/README.md`.
+
 The wrapper:
 
 1. locates the repository from its own path;

@@ -927,6 +927,8 @@ def parse_args() -> argparse.Namespace:
         required=True,
         choices=(
             "gg4l",
+            "gg4l_h",
+            "gg4l_b",
             "qqZZ",
             "vpolar_LL",
             "vpolar_TT",

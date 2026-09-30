@@ -97,7 +97,9 @@ def _isolated_builder(tmp_path: Path) -> Path:
 
 
 def _gridpack_inputs(tmp_path: Path, process: str) -> tuple[Path, Path, Path, int]:
-    run_number = 100001 if process == "gg4l" else 100002
+    run_number = {
+        "gg4l": 100001, "gg4l_h": 100007, "gg4l_b": 100008, "qqZZ": 100002
+    }[process]
     card = tmp_path / f"mc.{process}.py"
     card.write_text(f'PROCESS = "{process}"\n', encoding="utf-8")
     gridpack = tmp_path / f"{process}.integration_grids.tar.gz"
@@ -148,7 +150,7 @@ def _environment(tmp_path: Path, process: str) -> dict[str, str]:
     }
 
 
-@pytest.mark.parametrize("process", ["gg4l", "qqZZ"])
+@pytest.mark.parametrize("process", ["gg4l", "gg4l_h", "gg4l_b", "qqZZ"])
 def test_prepares_and_validates_supported_powheg_gridpack(
     tmp_path: Path, process: str
 ):

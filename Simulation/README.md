@@ -9,13 +9,16 @@ The generation samples are direct `e-e+mu-mu+` final states:
 
 - `gg4l`: the full gluon-initiated process, including Higgs, continuum, and
   their interference;
+- `gg4l_h`: the Higgs-mediated contribution only;
+- `gg4l_b`: the gluon-initiated continuum contribution only;
 - `qqZZ`: the quark-initiated four-lepton process;
 - `vpolar_LL`, `vpolar_TT`, `vpolar_TL`, and `vpolar_LT`: standalone
   MadGraph/Pythia polarization components in the same exclusive final state.
 
 All samples are already generated in the desired decay channel. Therefore the
 simulation applies an identity event-weight scale of exactly `1.0` to every
-process. In particular, no Higgs branching fraction is applied to `gg4l`.
+process. In particular, no Higgs branching fraction is applied to either
+`gg4l` or `gg4l_h`: the exclusive four-lepton decay is already generated.
 `Event.CrossSection` and `Event.CrossSectionError` are preserved unchanged as
 signed, running Pythia diagnostics. The authoritative filtered normalization
 comes from the pre-shower `IDWTUP=-4` LHE sample mean recorded by the generation
@@ -79,8 +82,8 @@ Every dressed lepton must:
 The remaining origin requirement is selected from the resolved process, and
 the two policies are deliberately mutually exclusive:
 
-- `gg4l` and `qqZZ` retain the original rule: the lepton must descend from a
-  W, Z, or virtual photon above 5 GeV. Polarized Z identifiers 230 and 231 are
+- `gg4l`, `gg4l_h`, `gg4l_b`, and `qqZZ` retain the original rule: the
+  lepton must descend from a W, Z, or virtual photon above 5 GeV. Polarized Z identifiers 230 and 231 are
   also recognized (and exempted from the generic numeric hadron-ID test).
 - `vpolar_*` requires a direct hard-process lepton. Starting from the stable
   candidate, Delphes follows only exact signed-PDG copies and requires a
@@ -287,6 +290,10 @@ The runner accepts a direct HepMC2/3 ASCII file regardless of its basename:
 ```bash
 Simulation/run_simulation.sh /path/to/output.events.hepmc3 --process gg4l
 ```
+
+For the separate POWHEG contributions, use `--process gg4l_h` or
+`--process gg4l_b`, or let the adjacent generation metadata select the mode.
+Both use the same detector response and output schema as `gg4l`.
 
 It also accepts a generation job directory containing exactly one nonempty
 `*.hepmc`, `*.hepmc2`, or `*.hepmc3` file, or a campaign containing completed

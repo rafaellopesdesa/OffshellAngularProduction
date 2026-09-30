@@ -49,6 +49,14 @@ def make_powheg_gridpack(tmp_path: Path, process: str = "gg4l") -> tuple[Path, P
             100001,
             "mc.PhPy8_NNPDF30_gg4l_full_2e2mu_m4l150_3000.py",
         ),
+        "gg4l_h": (
+            100007,
+            "mc.PhPy8_NNPDF30_gg4l_h_2e2mu_m4l150_3000.py",
+        ),
+        "gg4l_b": (
+            100008,
+            "mc.PhPy8_NNPDF30_gg4l_b_2e2mu_m4l150_3000.py",
+        ),
         "qqZZ": (100002, "mc.PhPy8EG_ZZ2e2mu_mll50.py"),
     }
     run_number, job_option_name = configs[process]
@@ -94,12 +102,13 @@ def make_powheg_gridpack(tmp_path: Path, process: str = "gg4l") -> tuple[Path, P
     return gridpack, metadata
 
 
-def test_prepares_deterministic_disjoint_jobs(tmp_path: Path) -> None:
+@pytest.mark.parametrize("process", ("gg4l", "gg4l_h", "gg4l_b", "qqZZ"))
+def test_prepares_deterministic_disjoint_jobs(tmp_path: Path, process: str) -> None:
     output_root = tmp_path / "output"
     campaign_dir = tmp_path / "submit"
-    gridpack, metadata = make_powheg_gridpack(tmp_path)
+    gridpack, metadata = make_powheg_gridpack(tmp_path, process)
     result = invoke(
-        "gg4l",
+        process,
         "--jobs",
         3,
         "--events-per-job",
@@ -130,6 +139,13 @@ def test_prepares_deterministic_disjoint_jobs(tmp_path: Path) -> None:
     assert [record["job_id"] for record in records] == [20, 21, 22]
     assert [record["first_event"] for record in records] == [1001, 1008, 1015]
     assert [record["events"] for record in records] == [7, 7, 7]
+    assert all(record["process"] == process for record in records)
+    assert all(record["generator_prefix"] is None for record in records)
+    assert all(record["generation_cores"] is None for record in records)
+    assert [record["publish_dir"] for record in records] == [
+        str(output_root / process / "campaign_44" / f"job_{job_id:06d}")
+        for job_id in (20, 21, 22)
+    ]
     intervals = [
         set(range(record["first_event"], record["first_event"] + record["events"]))
         for record in records
@@ -163,6 +179,7 @@ def test_prepares_deterministic_disjoint_jobs(tmp_path: Path) -> None:
     )
     manifest = json.loads((campaign_dir / "campaign.json").read_text(encoding="utf-8"))
     assert manifest["schema_version"] == 2
+    assert manifest["process"] == process
     assert manifest["gridpack_sha256"] == expected_gridpack_sha256
     assert manifest["gridpack_metadata_sha256"] == expected_metadata_sha256
 
@@ -407,7 +424,7 @@ def test_incompatible_vpolar_gridpack_fails_before_materialization(
 
 @pytest.mark.parametrize(
     "process",
-    ("gg4l", "qqZZ", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"),
+    ("gg4l", "gg4l_h", "gg4l_b", "qqZZ", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"),
 )
 def test_multi_job_campaign_requires_gridpack_before_materialization(
     tmp_path: Path,
@@ -450,17 +467,27 @@ def test_multi_job_campaign_requires_gridpack_before_materialization(
     assert not (tmp_path / "campaign").exists()
 
 
+@pytest.mark.parametrize(
+    ("process", "gridpack_process"),
+    (
+        ("gg4l", "qqZZ"),
+        ("gg4l", "gg4l_h"),
+        ("gg4l_h", "gg4l"),
+        ("gg4l_h", "gg4l_b"),
+        ("gg4l_b", "gg4l"),
+        ("gg4l_b", "gg4l_h"),
+    ),
+)
 def test_incompatible_powheg_gridpack_fails_before_materialization(
     tmp_path: Path,
+    process: str,
+    gridpack_process: str,
 ) -> None:
-    gridpack, metadata = make_powheg_gridpack(tmp_path)
-    manifest = json.loads(metadata.read_text(encoding="utf-8"))
-    manifest["process"] = "qqZZ"
-    metadata.write_text(json.dumps(manifest), encoding="utf-8")
+    gridpack, metadata = make_powheg_gridpack(tmp_path, gridpack_process)
     campaign_dir = tmp_path / "campaign"
 
     result = invoke(
-        "gg4l",
+        process,
         "--jobs",
         2,
         "--events-per-job",
@@ -740,7 +767,9 @@ def test_submit_calls_condor_only_when_requested(
     ]
 
 
-def fake_job_record(tmp_path: Path, workflow_body: str) -> tuple[Path, Path, Path]:
+def fake_job_record(
+    tmp_path: Path, workflow_body: str, *, process: str = "gg4l"
+) -> tuple[Path, Path, Path]:
     repository = tmp_path / "repository"
     workflow = repository / "Workflow" / "run_chain.sh"
     workflow.parent.mkdir(parents=True)
@@ -767,7 +796,7 @@ def fake_job_record(tmp_path: Path, workflow_body: str) -> tuple[Path, Path, Pat
         check=True,
     )
     snapshot = load_snapshot_module().inspect_repository(repository)
-    publish_dir = tmp_path / "results" / "gg4l" / "campaign_88" / "job_000004"
+    publish_dir = tmp_path / "results" / process / "campaign_88" / "job_000004"
     failure_parent = publish_dir.parent / "failures"
     record = {
         "schema_version": 2,
@@ -775,7 +804,7 @@ def fake_job_record(tmp_path: Path, workflow_body: str) -> tuple[Path, Path, Pat
         "repository_revision": snapshot["revision"],
         "repository_snapshot_contract": snapshot["contract"],
         "repository_snapshot_sha256": snapshot["sha256"],
-        "process": "gg4l",
+        "process": process,
         "events": 3,
         "seed": 17,
         "job_id": 4,
@@ -857,13 +886,17 @@ def test_worker_rejects_repository_drift_before_execution(tmp_path: Path) -> Non
     assert list(scratch.iterdir()) == []
 
 
+@pytest.mark.parametrize("process", ("gg4l", "gg4l_h", "gg4l_b"))
 def test_worker_stages_locally_and_atomically_publishes_compact_outputs(
-    tmp_path: Path,
+    tmp_path: Path, process: str,
 ) -> None:
+    arguments_file = tmp_path / "workflow-arguments.txt"
     record_path, publish_dir, _ = fake_job_record(
         tmp_path,
         """#!/usr/bin/env bash
 set -euo pipefail
+printf '%s\\n' "$@" >"${OAP_TEST_WORKFLOW_ARGUMENTS}"
+process=$1
 output_dir=
 analysis_output=
 while (($#)); do
@@ -876,17 +909,19 @@ done
 generation=${output_dir}/generation
 mkdir -p "${generation}/delphes_ATLAS"
 printf 'ROOT' >"${analysis_output}"
-printf 'process=gg4l\n' >"${generation}/run-metadata.txt"
+printf 'process=%s\\n' "${process}" >"${generation}/run-metadata.txt"
 printf '{}\n' >"${generation}/lhe-contract-metadata.json"
 printf '{}\n' >"${generation}/alignment-metadata.json"
-printf 'process=gg4l\n' >"${generation}/delphes_ATLAS/simulation-metadata.txt"
+printf 'process=%s\\n' "${process}" >"${generation}/delphes_ATLAS/simulation-metadata.txt"
 touch "${output_dir}/SUCCESS"
 """,
+        process=process,
     )
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     environment = os.environ.copy()
     environment["_CONDOR_SCRATCH_DIR"] = str(scratch)
+    environment["OAP_TEST_WORKFLOW_ARGUMENTS"] = str(arguments_file)
     result = subprocess.run(
         worker_command(record_path),
         text=True,
@@ -902,11 +937,14 @@ touch "${output_dir}/SUCCESS"
         (publish_dir / "publication.json").read_text(encoding="utf-8")
     )
     assert publication["job_id"] == 4
+    assert publication["process"] == process
     assert len(publication["analysis_sha256"]) == 64
     published_record = (publish_dir / "job-record.json").read_bytes()
     assert publication["job_record_sha256"] == hashlib.sha256(
         published_record
     ).hexdigest()
+    assert json.loads(published_record)["process"] == process
+    assert arguments_file.read_text(encoding="utf-8").splitlines()[0] == process
     assert list(scratch.iterdir()) == []
 
 

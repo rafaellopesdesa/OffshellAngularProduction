@@ -120,7 +120,8 @@ if set(payload) != keys:
 if payload["schema_version"] != 2:
     raise SystemExit("unsupported job-record schema_version")
 if payload["process"] not in {
-    "gg4l", "qqZZ", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"
+    "gg4l", "gg4l_h", "gg4l_b", "qqZZ",
+    "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT",
 }:
     raise SystemExit("unsupported process in job record")
 

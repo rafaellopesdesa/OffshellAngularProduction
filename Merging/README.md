@@ -20,6 +20,17 @@ must belong to one campaign and one physics sample, and every source job must
 use a distinct generation seed and a distinct Delphes seed. Existing output is
 never replaced unless `--overwrite` is supplied.
 
+Merge `gg4l`, `gg4l_h`, and `gg4l_b` separately, with the corresponding
+process name in the output and input paths. The two new samples have distinct
+sample codes 2 and 3; code 0 continues to identify full `gg4l`. A mixed-process
+merge is rejected. Each contribution receives its own physical cross-section
+normalization and the same luminosity and angular-weight branches described
+below. There is no additional Higgs branching-fraction factor.
+
+The sum of Higgs-only and continuum-only histograms represents $H+B$. The
+full `gg4l` sample includes their interference as well, so it is not generally
+equal to that sum.
+
 Merged campaign files are final products, not valid inputs to another merge.
 To extend a campaign after more small jobs finish, rerun the command over all
 of the original job-level `analysis.root` files and replace the prior output
@@ -230,7 +241,8 @@ and code provenance.
 Each input is also bound to its registered source role: `vpolar_LL` through
 `vpolar_LT` use permanent sample codes 10 through 13, respectively, and the
 standalone backend is `madgraph5-pythia8-vpolar-standalone`. Relabeling a gg4l
-or qqZZ file with polarization strings is rejected.
+(including `gg4l_h` and `gg4l_b`) or qqZZ file with polarization strings is
+rejected.
 
 Each job's generation metadata must declare the VPolar contract through
 `provenance.generation`: `polarization_component`, `polarization_z1_decay`,

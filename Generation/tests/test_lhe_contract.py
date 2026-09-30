@@ -177,7 +177,7 @@ def test_rejects_nonfinite_lepton_momentum(tmp_path: Path):
         )
 
 
-@pytest.mark.parametrize("process", ("gg4l", "vpolar_LL"))
+@pytest.mark.parametrize("process", ("gg4l", "gg4l_h", "gg4l_b", "vpolar_LL"))
 def test_rejects_non_minus_four_lhe_weighting_strategy(
     tmp_path: Path, process: str
 ):
@@ -218,9 +218,9 @@ def test_single_generated_event_has_undefined_mc_error(tmp_path: Path):
 
 @pytest.mark.parametrize(
     "process",
-    ("vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"),
+    ("gg4l", "gg4l_h", "gg4l_b", "vpolar_LL", "vpolar_TT", "vpolar_TL", "vpolar_LT"),
 )
-def test_accepts_vpolar_process_modes(tmp_path: Path, process: str):
+def test_accepts_process_modes(tmp_path: Path, process: str):
     lhe = tmp_path / "LHE.TXT.events"
     archive = tmp_path / "LHE.TXT.tar.gz"
     lhe.write_text(_document([_event(200.0)]))

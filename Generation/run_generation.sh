@@ -15,6 +15,8 @@ Usage:
 
 PROCESS:
   gg4l                 gg -> (H* + continuum + interference) -> 2e2mu
+  gg4l_h               gg -> H* -> 2e2mu (Higgs only)
+  gg4l_b               gg -> 2e2mu (continuum background only)
   qqZZ                 qq -> ZZ -> 2e2mu
   vpolar_LL            gg -> ZL(mu mu) ZL(e e) -> 2e2mu
   vpolar_TT            gg -> ZT(mu mu) ZT(e e) -> 2e2mu
@@ -22,7 +24,7 @@ PROCESS:
   vpolar_LT            gg -> ZL(mu mu) ZT(e e) -> 2e2mu
 
 Options:
-  --events N           Requested output events (default: 50 gg4l/VPolar, 1000 qqZZ)
+  --events N           Requested output events (default: 50 gg4l modes/VPolar, 1000 qqZZ)
   --seed N             Generator and shower random seed (default: 1)
   --first-event N      First output event number (default: 1)
   --output-dir DIR     Run directory (default: Generation/runs/PROCESS_seedSEED)
@@ -77,6 +79,20 @@ case "$PROCESS" in
     GENERATOR_M4L_MIN_GEV=150
     GENERATOR_M4L_MAX_GEV=3000
     ;;
+  gg4l_h)
+    RUN_NUMBER=100007
+    DEFAULT_EVENTS=50
+    JOB_OPTION_NAME="mc.PhPy8_NNPDF30_gg4l_h_2e2mu_m4l150_3000.py"
+    GENERATOR_M4L_MIN_GEV=150
+    GENERATOR_M4L_MAX_GEV=3000
+    ;;
+  gg4l_b)
+    RUN_NUMBER=100008
+    DEFAULT_EVENTS=50
+    JOB_OPTION_NAME="mc.PhPy8_NNPDF30_gg4l_b_2e2mu_m4l150_3000.py"
+    GENERATOR_M4L_MIN_GEV=150
+    GENERATOR_M4L_MAX_GEV=3000
+    ;;
   qqZZ|qqzz)
     PROCESS="qqZZ"
     RUN_NUMBER=100002
@@ -86,7 +102,7 @@ case "$PROCESS" in
     GENERATOR_M4L_MAX_GEV=3000
     ;;
   *)
-    echo "PROCESS must be gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
+    echo "PROCESS must be gg4l, gg4l_h, gg4l_b, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
     exit 2
     ;;
 esac

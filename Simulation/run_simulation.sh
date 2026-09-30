@@ -34,7 +34,7 @@ INPUT may be:
   - one individual jobs/job_* directory.
 
 Options:
-  --process NAME       auto, gg4l, qqZZ, or a vpolar_* mode
+  --process NAME       auto, gg4l, gg4l_h, gg4l_b, qqZZ, or a vpolar_* mode
                        (default: auto from run-metadata.txt)
   --output-root DIR    Put outputs below DIR/JOB_LABEL instead of beside input
   --card FILE          Override Delphes's bundled delphes_card_ATLAS.tcl
@@ -105,9 +105,9 @@ while (($#)); do
 done
 
 case "$PROCESS" in
-  auto|gg4l|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
+  auto|gg4l|gg4l_h|gg4l_b|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
   *)
-    echo "--process must be auto, gg4l, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
+    echo "--process must be auto, gg4l, gg4l_h, gg4l_b, qqZZ, vpolar_LL, vpolar_TT, vpolar_TL, or vpolar_LT" >&2
     exit 2
     ;;
 esac
@@ -485,7 +485,7 @@ for input_file in "${INPUT_FILES[@]}"; do
   if [[ "$resolved_process" == auto ]]; then
     resolved_process="$metadata_process"
     case "$resolved_process" in
-      gg4l|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
+      gg4l|gg4l_h|gg4l_b|qqZZ|vpolar_LL|vpolar_TT|vpolar_TL|vpolar_LT) ;;
       *)
         echo "Cannot infer a supported process for $input_file; pass --process explicitly." >&2
         failures=$((failures + 1))

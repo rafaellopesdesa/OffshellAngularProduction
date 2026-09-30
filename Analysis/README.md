@@ -44,10 +44,21 @@ The stable logical key is
 (campaign_id, sample_code, job_id, source_event_id)
 ```
 
-with `sample_code=0` for gg4l, `sample_code=1` for qqZZ, and codes 10, 11, 12,
-and 13 for VPolar LL, TT, TL, and LT, respectively. Two deterministic
-BLAKE2b-128 words, `event_uid_hi` and `event_uid_lo`, make that key convenient
-to carry through later merges. `lhe_event_index` remains the matched-file
+with permanent sample codes:
+
+| Sample | `sample_code` |
+|---|---:|
+| `gg4l` | 0 |
+| `qqZZ` | 1 |
+| `gg4l_h` | 2 |
+| `gg4l_b` | 3 |
+| `vpolar_LL` | 10 |
+| `vpolar_TT` | 11 |
+| `vpolar_TL` | 12 |
+| `vpolar_LT` | 13 |
+
+Two deterministic BLAKE2b-128 words, `event_uid_hi` and `event_uid_lo`, make
+that key convenient to carry through later merges. `lhe_event_index` remains the matched-file
 ordinal and is only a diagnostic. Merging must preserve the source identity;
 it must not replace it with a file-order-based event ID. Reordering or removing
 events therefore does not change the UID of a surviving source event.
@@ -77,6 +88,11 @@ python Analysis/build_analysis_tree.py \
   --simulation-metadata /path/to/job/delphes_ATLAS/simulation-metadata.txt \
   --output /path/to/job/analysis.root
 ```
+
+Use `--sample gg4l_h` or `--sample gg4l_b` for the separate Higgs or
+gluon-continuum contributions. The sample must match all supplied generation
+and simulation metadata; it cannot relabel a full `gg4l` sample. The analysis
+selection and output branches are identical across the three modes.
 
 The four metadata inputs are mandatory. Before opening the event streams, the
 reducer validates the actual matched-LHE and Delphes SHA-256 digests; the
