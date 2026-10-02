@@ -10,10 +10,11 @@ python = ">=3.10,<3.14"
 pip = ">=24"
 
 [pypi-dependencies]
-offshell-angular-production = { path = ".", editable = true, extras = ["test"] }
+offshell-angular-production = { path = ".", editable = true, extras = ["test", "plotting"] }
 
 [tasks]
 test = "pytest -q"
-lint = "python -m compileall -q src Analysis Generation Simulation Merging UChicagoAF Workflow && bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh"
+lint = "python -m compileall -q src Analysis Generation Simulation Merging Plotting UChicagoAF Workflow && bash -n Generation/*.sh Simulation/*.sh UChicagoAF/*.sh Workflow/*.sh"
 analyze = "python Analysis/build_analysis_tree.py"
 merge = "python Merging/merge_analysis_outputs.py"
+plot = "python Plotting/plot_analysis.py"

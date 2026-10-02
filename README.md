@@ -51,6 +51,7 @@ Pythia8. Herwig is not part of the chain.
 | `Simulation/` | Pinned, patched Delphes response with dressed and RECO leptons |
 | `Analysis/` | Strict LHE/Delphes matcher and compact ROOT writer |
 | `Merging/` | Cross-section-safe campaign merger and LHE truth angular weights |
+| `Plotting/` | Multi-page kinematic and acceptance reports from merged ROOT files |
 | `src/offshell_production/` | Shared Born projection, angles, LHE parsing, and selection |
 | `Workflow/` | One-job end-to-end worker used locally and by HTCondor |
 | `UChicagoAF/` | UChicago runtime guidance, container wrapper, and Condor campaigns |
@@ -61,7 +62,7 @@ Pythia8. Herwig is not part of the chain.
 Install the small analysis environment in a clean shell:
 
 ```bash
-uv sync --frozen --extra test
+uv sync --frozen --extra test --extra plotting
 source .venv/bin/activate
 ```
 
@@ -152,6 +153,22 @@ and angular-component `_pb` branches retain their cross-section normalization;
 multiply `weight_truth_<slug>_pb` by `lumi` for an angular-component yield. See
 `Merging/README.md` for the merge command and exact branch definitions.
 
+After merging, produce a single PDF with RECO-selected LHE/dressed/RECO
+distributions, all-event LHE/dressed distributions, and acceptance times
+efficiency versus each LHE and dressed variable:
+
+```bash
+pixi run plot /data/$USER/offshell/merged/qqZZ.root \
+  --output /data/$USER/offshell/plots/qqZZ.pdf
+```
+
+With uv, use `uv run --frozen --extra plotting python Plotting/plot_analysis.py`
+followed by the same arguments. The report uses the stored luminosity and
+signed cross-section weights, with ATLAS-style plotting through `matplotlib`,
+`hist`, and `mplhep`. All-event denominators retain the generator phase-space
+cuts but apply no RECO selection. See [`Plotting/README.md`](Plotting/README.md)
+for the observable coverage, ratio definition, and uncertainty treatment.
+
 ## Important qqZZ matching note
 
 POWHEG's `ZZ` interface exposes the dilepton lower cut but no native four-lepton
@@ -188,7 +205,7 @@ prefix for polarized modes. See `UChicagoAF/condor/README.md`.
 The unit tests require neither Athena nor ROOT:
 
 ```bash
-uv run --frozen --extra test python -m pytest -q
+uv run --frozen --extra test --extra plotting python -m pytest -q
 bash -n Generation/*.sh Generation/VPolar/*.sh Simulation/*.sh \
   UChicagoAF/*.sh UChicagoAF/condor/*.sh Workflow/*.sh
 ```

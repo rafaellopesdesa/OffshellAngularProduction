@@ -6,6 +6,7 @@ DOCUMENTATION_ROOTS = (
     "Analysis",
     "Generation",
     "Merging",
+    "Plotting",
     "Simulation",
     "UChicagoAF",
     "Workflow",

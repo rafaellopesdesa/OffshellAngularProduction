@@ -21,9 +21,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Install
-        run: uv sync --frozen --extra test
+        run: uv sync --frozen --extra test --extra plotting
       - name: Python tests
-        run: uv run --frozen --extra test python -m pytest -q
+        run: uv run --frozen --extra test --extra plotting python -m pytest -q
       - name: Shell syntax
         run: >-
           bash -n Generation/*.sh Generation/VPolar/*.sh Simulation/*.sh

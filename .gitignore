@@ -10,6 +10,7 @@ htmlcov/
 Generation/runs/
 Simulation/runs/
 Workflow/runs/
+Plotting/plots/
 *.EVNT.pool.root
 *.lhe
 *.lhe.gz

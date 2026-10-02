@@ -103,6 +103,22 @@ merged file, rerun the merger on the original job-level analysis files, using
 do not need to be rerun. Regenerate older campaign merges before passing them
 to the polarization-combination script, which requires the current merge schema.
 
+The merged file can be passed directly to the plotting workflow:
+
+```bash
+pixi run plot /data/$USER/offshell/merged/gg4l.root \
+  --output /data/$USER/offshell/plots/gg4l.pdf
+```
+
+The single PDF contains RECO-selected distributions at LHE, dressed, and RECO
+level, all-event LHE/dressed distributions, and acceptance times efficiency
+versus the LHE and dressed variables. It uses the signed nominal
+cross-section weights multiplied once by the stored luminosity, with
+`--lumi-fb` available for another luminosity. Angular-component weights are
+not substituted for nominal event weights. See
+[`Plotting/README.md`](../Plotting/README.md) for the commands and the ratio
+and uncertainty definitions.
+
 ## LHE truth angular weights
 
 The merger uses the already stored Born-projected LHE coordinates

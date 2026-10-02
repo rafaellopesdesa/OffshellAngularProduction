@@ -214,3 +214,16 @@ The `analysis_metadata` JSON object embeds normalized copies of generation,
 LHE-contract, alignment, and simulation metadata plus SHA-256 and original-path
 provenance for every consumed file. Thus `analysis.root` remains auditable by
 itself.
+
+## Plotting the retained events
+
+After merging the job outputs to obtain `weight_nominal_pb` and the luminosity
+branches, use [`Plotting/plot_analysis.py`](../Plotting/plot_analysis.py) to
+produce one PDF of all stored continuous kinematic variables. It compares LHE,
+dressed, and RECO distributions for `reconstructed == true`, then shows LHE
+and dressed distributions without that selection and the corresponding
+acceptance-times-efficiency ratios. Each histogram uses its own level's
+validity mask; missing RECO candidates remain available in the LHE/dressed
+denominators. The report preserves the fixed flavor assignment and all stored
+angular conventions. See [`Plotting/README.md`](../Plotting/README.md) for
+commands and the precise denominator definition.

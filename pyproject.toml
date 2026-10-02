@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+plotting = ["matplotlib>=3.8", "hist>=2.7", "mplhep>=0.3"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/offshell_production"]
@@ -32,4 +33,5 @@ testpaths = [
     "Generation/VPolar",
     "Simulation/tests",
     "Merging/tests",
+    "Plotting/tests",
 ]
