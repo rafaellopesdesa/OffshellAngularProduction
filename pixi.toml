@@ -18,3 +18,4 @@ lint = "python -m compileall -q src Analysis Generation Simulation Merging Plott
 analyze = "python Analysis/build_analysis_tree.py"
 merge = "python Merging/merge_analysis_outputs.py"
 plot = "python Plotting/plot_analysis.py"
+plot-closure = "python Plotting/plot_angular_closure.py"

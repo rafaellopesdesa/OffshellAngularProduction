@@ -166,6 +166,25 @@ Invalid LHE projections remain in `Events`, with `truth_lhe_valid=false` and
 formed from these contributions; it does not include the separately reported
 finite-LHE uncertainty of the pooled cross-section normalization.
 
+These event weights are **moment projectors**, not an event-by-event
+decomposition into physical component samples. Their raw sum therefore need
+not reproduce the nominal angular histogram. To test the retained expansion,
+sum them into coefficients and reconstruct each coefficient's angular basis
+shape with the separate closure command:
+
+```bash
+pixi run plot-closure /data/$USER/offshell/merged/gg4l.root \
+  --output /data/$USER/offshell/plots/gg4l_closure.pdf
+```
+
+This reads and checks the stored LHE projector weights. It also measures
+moments from dressed and RECO angles for separate closure tests of those
+densities. All-event LHE/dressed and RECO-selected LHE/dressed/RECO contexts
+each use their own coefficients and common validity mask. The constant
+component fixes the integral, so shape residuals supply the closure test.
+See [the closure report documentation](../Plotting/README.md#angular-closure-report)
+for the basis normalization, folded azimuth, and correlated errors.
+
 ## Composing the polarized validation samples
 
 `compose_polarized_components.py` takes four campaign-level outputs from the

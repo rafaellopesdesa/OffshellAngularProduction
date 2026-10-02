@@ -51,7 +51,7 @@ Pythia8. Herwig is not part of the chain.
 | `Simulation/` | Pinned, patched Delphes response with dressed and RECO leptons |
 | `Analysis/` | Strict LHE/Delphes matcher and compact ROOT writer |
 | `Merging/` | Cross-section-safe campaign merger and LHE truth angular weights |
-| `Plotting/` | Multi-page kinematic and acceptance reports from merged ROOT files |
+| `Plotting/` | Separate kinematic/acceptance and angular-closure PDF reports from merged ROOT files |
 | `src/offshell_production/` | Shared Born projection, angles, LHE parsing, and selection |
 | `Workflow/` | One-job end-to-end worker used locally and by HTCondor |
 | `UChicagoAF/` | UChicago runtime guidance, container wrapper, and Condor campaigns |
@@ -168,6 +168,25 @@ signed cross-section weights, with ATLAS-style plotting through `matplotlib`,
 `hist`, and `mplhep`. All-event denominators retain the generator phase-space
 cuts but apply no RECO selection. See [`Plotting/README.md`](Plotting/README.md)
 for the observable coverage, ratio definition, and uncertainty treatment.
+
+To test how well the retained angular coefficients reproduce the helicity
+distributions, use the separate closure command:
+
+```bash
+pixi run plot-closure /data/$USER/offshell/merged/gg4l.root \
+  --output /data/$USER/offshell/plots/gg4l_closure.pdf
+```
+
+The report reconstructs angular shapes from the constant component and the
+four retained moments, with individual components, their sum, and the nominal
+distribution. It tests all-event LHE/dressed and RECO-selected
+LHE/dressed/RECO densities separately, including a two-dimensional polar-angle
+map and a folded azimuth sensitive to the mixed-$m$ interference term.
+The RECO coefficients are measured again from the selected RECO angles;
+these plots are a truncation test, not a detector-folded prediction from
+inclusive LHE coefficients. See the
+[closure documentation](Plotting/README.md#angular-closure-report) for the
+expansion, available projections, and correlated uncertainties.
 
 ## Important qqZZ matching note
 
